@@ -1,0 +1,32 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO

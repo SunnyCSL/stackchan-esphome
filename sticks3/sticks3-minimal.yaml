@@ -1,0 +1,96 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    - priority: 200
+      then:
+        - delay: 200ms
+        - output.turn_on: bl_pin
+        - component.update: sticks3_display
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_FLASH_SIZE: "8388608"
+      CONFIG_PARTITION_TABLE_CUSTOM: "y"
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+spi:
+  clk_pin: GPIO40
+  mosi_pin: GPIO39
+
+time:
+  - platform: homeassistant
+    id: esptime
+
+output:
+  - platform: gpio
+    pin: GPIO38
+    id: bl_pin
+
+# ── Display (ST7789P3, 135x240) ──
+display:
+  - platform: st7789v
+    model: TTGO TDisplay 135x240
+    cs_pin: GPIO41
+    dc_pin: GPIO45
+    reset_pin: GPIO21
+    rotation: 90°
+    update_interval: 10s
+    id: sticks3_display
+    pages:
+      - id: page_minimal
+        lambda: |-
+          it.fill(Color(5, 5, 15));
+          it.strftime(0, 0, id(font_md), Color::WHITE, TextAlign::TOP_LEFT, "%H:%M", id(esptime).now());
+          it.printf(0, 30, id(font_sm), Color(100, 200, 255), "StickS3 MINIMAL");
+          it.printf(0, 50, id(font_sm), Color(80, 80, 80), "OK no audio");
+
+font:
+  - file: "gfonts://Figtree"
+    id: font_md
+    size: 20
+    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
+  - file: "gfonts://Figtree"
+    id: font_sm
+    size: 12
+    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
+
+binary_sensor:
+  - platform: gpio
+    name: "Button KEY1"
+    pin:
+      number: GPIO11
+      mode: INPUT_PULLUP
+      inverted: true
+  - platform: gpio
+    name: "Button KEY2"
+    pin:
+      number: GPIO12
+      mode: INPUT_PULLUP
+      inverted: true

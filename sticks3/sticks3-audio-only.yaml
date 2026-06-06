@@ -1,0 +1,63 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    - priority: 500
+      then:
+        - lambda: |-
+            // M5PM1 L3B power rail enable for ES8311 — guarded, never crashes on I2C fail
+            auto write_reg = [](uint8_t reg, uint8_t val) -> bool {
+              std::array<uint8_t, 2> d = {reg, val};
+              auto err = id(bsp_i2c).write(0x6E, d.data(), d.size());
+              return err == i2c::ERROR_OK;
+            };
+            if (!write_reg(0x09, 0x00)) ESP_LOGW("bsp", "L3B reg 0x09 nack (continue)");
+            delay(50);
+            if (!write_reg(0x16, 0x00)) ESP_LOGW("bsp", "L3B reg 0x16 nack (continue)");
+            delay(10);
+            if (!write_reg(0x10, 0x04)) ESP_LOGW("bsp", "L3B reg 0x10 nack (continue)");
+            delay(10);
+            if (!write_reg(0x11, 0x04)) ESP_LOGW("bsp", "L3B reg 0x11 nack (continue)");
+            delay(100);
+            ESP_LOGI("bsp", "L3B init done for audio codec");
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: arduino
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+i2c:
+  - id: bsp_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: false
+
+# Audio ONLY — minimal test: i2s_audio block only, no mic/speaker yet
+i2s_audio:
+  i2s_lrclk_pin: GPIO15
+  i2s_bclk_pin: GPIO17
+  i2s_mclk_pin: GPIO18

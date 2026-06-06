@@ -1,0 +1,85 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  platformio_options:
+    board: esp32s3
+    framework: espidf
+    build_flags:
+      -DBOARD_HAS_PSRAM
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB: "y"
+      CONFIG_I2S_EXTRA_IRAM: "y"
+      CONFIG_I2S_DMA_BUFFER_SIZE: "1024"
+
+psram:
+  mode: quad
+  speed: 80MHz
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+i2c:
+  - id: bsp_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: false
+
+# Workaround for ESPHome i2s_audio crash on ESP32-S3:
+# 1. Explicit I2S port assignment
+# 2. PSRAM config (even without hardware)
+# 3. SDK config for I2S DMA
+# 4. M5PM1 L3B init for codec power
+i2s_audio:
+  - id: i2s_out
+    i2s_lrclk_pin: GPIO15
+    i2s_bclk_pin: GPIO17
+    i2s_mclk_pin: GPIO18
+    i2s_id: 0
+
+microphone:
+  - platform: i2s_audio
+    id: mic_a
+    i2s_audio_id: i2s_out
+    adc_type: external
+    i2s_din_pin: GPIO16
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: stereo
+
+speaker:
+  - platform: i2s_audio
+    id: speaker_a
+    dac_type: external
+    i2s_audio_id: i2s_out
+    i2s_dout_pin: GPIO14
+    sample_rate: 16000
+    bits_per_sample: 16bit

@@ -1,0 +1,561 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    - priority: 500
+      then:
+        - lambda: |-
+            // M5PM1 @ 0x6E: enable L3B power rail for display backlight + LDOs
+            uint8_t cmd[2];
+            // 0. Enable LDO4 + LDO5 for audio periphs
+            cmd[0] = 0x12;
+            id(bsp_i2c).write(0x6E, cmd, 1);
+            uint8_t ldo_val;
+            if (id(bsp_i2c).read(0x6E, &ldo_val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
+              ldo_val |= 0xC0;
+              cmd[0] = 0x12; cmd[1] = ldo_val;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+              delay(10);
+            }
+            // 1. disable idle-sleep (reg 0x09 = 0)
+            cmd[0] = 0x09; cmd[1] = 0x00;
+            id(bsp_i2c).write(0x6E, cmd, 2);
+            delay(50);
+            // 2. set PYG2 function to GPIO (reg 0x16 bits 5:4 = 00)
+            cmd[0] = 0x16;
+            id(bsp_i2c).write(0x6E, cmd, 1);
+            uint8_t func0;
+            if (id(bsp_i2c).read(0x6E, &func0, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
+              func0 &= ~0x30;
+              cmd[0] = 0x16; cmd[1] = func0;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+            }
+            delay(10);
+            // 3. set PYG2 as output (reg 0x10 bit2 = 1)
+            cmd[0] = 0x10; cmd[1] = 0x04;
+            id(bsp_i2c).write(0x6E, cmd, 2);
+            delay(10);
+            // 4. PYG2 high → L3B ON (reg 0x11 bit2 = 1)
+            cmd[0] = 0x11; cmd[1] = 0x04;
+            id(bsp_i2c).write(0x6E, cmd, 2);
+            delay(100);
+    - priority: 200
+      then:
+        - delay: 200ms
+        - component.update: sticks3_display
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_FLASH_SIZE: "8388608"
+      CONFIG_PARTITION_TABLE_CUSTOM: "y"
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+web_server:
+  port: 80
+
+api:
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+i2c:
+  - id: bsp_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: false
+
+spi:
+  clk_pin: GPIO40
+  mosi_pin: GPIO39
+
+time:
+  - platform: homeassistant
+    id: esptime
+
+# ── Audio (I2S) ──
+i2s_audio:
+  i2s_lrclk_pin: GPIO15
+  i2s_bclk_pin: GPIO17
+  i2s_mclk_pin: GPIO18
+
+microphone:
+  - platform: i2s_audio
+    id: mic_a
+    adc_type: external
+    i2s_din_pin: GPIO16
+    pdm: false
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: stereo
+
+speaker:
+  - platform: i2s_audio
+    id: speaker_a
+    dac_type: external
+    i2s_dout_pin: GPIO14
+    sample_rate: 16000
+    bits_per_sample: 16bit
+
+media_player:
+  - platform: speaker
+    name: "StickS3 Speaker"
+    id: sticks3_speaker
+    announcement_pipeline:
+      speaker: speaker_a
+      format: WAV
+      sample_rate: 24000
+      num_channels: 1
+
+# ── Voice Assistant ──
+voice_assistant:
+  microphone: mic_a
+  speaker: speaker_a
+  noise_suppression_level: 2
+  auto_gain: 31dBFS
+  volume_multiplier: 5.0
+  use_wake_word: false
+  on_listening:
+    then:
+      - lambda: |-
+          id(voice_listening) = true;
+          id(display_line1) = "";
+          id(display_line2) = "";
+          id(display_mode) = 1;
+          id(sticks3_display).update();
+  on_stt_end:
+    then:
+      - lambda: |-
+          id(display_line1) = "You: " + x;
+          id(display_line2) = "";
+          id(display_mode) = 1;
+          id(sticks3_display).update();
+  on_tts_start:
+    then:
+      - lambda: |-
+          id(display_mode) = 2;
+          id(sticks3_display).update();
+  on_end:
+    then:
+      - lambda: |-
+          id(voice_listening) = false;
+          id(display_mode) = 0;
+          id(sticks3_display).update();
+  on_error:
+    then:
+      - lambda: |-
+          id(voice_listening) = false;
+          id(display_mode) = 0;
+          id(sticks3_display).update();
+      - homeassistant.event:
+          event: esphome.voice_error
+          data:
+            device: sticks3
+            error: "Voice assistant error"
+
+# ── Wake Word ──
+micro_wake_word:
+  models:
+    - hey_jarvis
+  on_wake_word_detected:
+    - then:
+        - lambda: |-
+            id(display_mode) = 1;
+            id(sticks3_display).update();
+        - voice_assistant.start:
+        - homeassistant.event:
+            event: esphome.wake_word_detected
+            data:
+              device: sticks3
+              confidence: "0.85"
+
+# ── Display (ST7789P3, 135x240) ──
+display:
+  - platform: st7789v
+    model: TTGO TDisplay 135x240
+    cs_pin: GPIO41
+    dc_pin: GPIO45
+    reset_pin: GPIO21
+    backlight_pin: GPIO38
+    rotation: 0°
+    update_interval: 10s
+    id: sticks3_display
+    pages:
+      - id: page_main
+        lambda: |-
+          it.fill(Color(5, 5, 15));
+          int mode = id(display_mode);
+          if (mode == 0) {
+            it.strftime(0, 0, id(font_lg), Color(100, 200, 255), TextAlign::TOP_LEFT, "%H:%M", id(esptime).now());
+            it.printf(0, 60, id(font_md), Color::WHITE, "Idle");
+            it.printf(0, 88, id(font_sm), Color(150, 150, 150), "%s", id(display_line1).c_str());
+          } else if (mode == 1) {
+            it.printf(0, 0, id(font_lg), Color(0, 255, 100), TextAlign::TOP_LEFT, "Listening");
+            it.printf(0, 48, id(font_md), Color::WHITE, "%s", id(display_line1).c_str());
+            it.printf(0, 76, id(font_sm), Color(200, 200, 200), "%s", id(display_line2).c_str());
+          } else if (mode == 2) {
+            it.printf(0, 0, id(font_lg), Color(255, 180, 0), TextAlign::TOP_LEFT, "Speaking");
+            it.printf(0, 48, id(font_md), Color::WHITE, "%s", id(display_line1).c_str());
+            it.printf(0, 76, id(font_sm), Color(200, 200, 200), "%s", id(display_line2).c_str());
+          } else if (mode == 9) {
+            it.printf(0, 0, id(font_lg), Color(100, 200, 255), TextAlign::TOP_LEFT, "%s", id(display_line1).c_str());
+            it.printf(0, 42, id(font_md), Color::WHITE, "%s", id(display_line2).c_str());
+            it.printf(0, 70, id(font_sm), Color(200, 200, 200), "%s", id(display_line3).c_str());
+          }
+
+font:
+  - file: "gfonts://Figtree"
+    id: font_lg
+    size: 32
+    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
+  - file: "gfonts://Figtree"
+    id: font_md
+    size: 20
+    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
+  - file: "gfonts://Figtree"
+    id: font_sm
+    size: 14
+    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
+
+globals:
+  - id: voice_listening
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: display_mode
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: display_line1
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+  - id: display_line2
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+  - id: display_line3
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+  - id: pushed_text_timer
+    type: int
+    restore_value: false
+    initial_value: '0'
+  # Display sleep / motion wake
+  - id: backlight_on
+    type: bool
+    restore_value: false
+    initial_value: 'true'
+  - id: idle_counter
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: accel_x_prev
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: accel_y_prev
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: accel_z_prev
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+script:
+  - id: sticks3_set_display_text
+    parameters:
+      line1: std::string
+      line2: std::string
+      line3: std::string
+    then:
+      - lambda: |-
+          id(display_line1) = line1;
+          id(display_line2) = line2;
+          id(display_line3) = line3;
+          id(display_mode) = 9;
+          id(pushed_text_timer) = 100;
+          id(sticks3_display).update();
+
+  # Backlight control via M5PM1 L3B
+  - id: backlight_turn_on
+    then:
+      - lambda: |-
+          uint8_t cmd[2];
+          cmd[0] = 0x11;
+          id(bsp_i2c).write(0x6E, cmd, 1);
+          uint8_t val;
+          if (id(bsp_i2c).read(0x6E, &val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
+            if (!(val & 0x04)) {
+              val |= 0x04;
+              cmd[0] = 0x11; cmd[1] = val;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+              delay(50);
+            }
+          }
+          id(backlight_on) = true;
+          id(idle_counter) = 0;
+  - id: backlight_turn_off
+    then:
+      - lambda: |-
+          uint8_t cmd[2];
+          cmd[0] = 0x11;
+          id(bsp_i2c).write(0x6E, cmd, 1);
+          uint8_t val;
+          if (id(bsp_i2c).read(0x6E, &val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
+            if (val & 0x04) {
+              val &= ~0x04;
+              cmd[0] = 0x11; cmd[1] = val;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+            }
+          }
+          id(backlight_on) = false;
+
+text:
+  - platform: template
+    id: display_text_line1
+    name: "StickS3 Display Line 1"
+    mode: text
+    update_interval: 1s
+    lambda: |-
+      return id(display_line1);
+    set_action:
+      - lambda: |-
+          id(display_line1) = x;
+          id(display_mode) = 9;
+          id(pushed_text_timer) = 100;
+          id(sticks3_display).update();
+  - platform: template
+    id: display_text_line2
+    name: "StickS3 Display Line 2"
+    mode: text
+    update_interval: 1s
+    lambda: |-
+      return id(display_line2);
+    set_action:
+      - lambda: |-
+          id(display_line2) = x;
+          id(display_mode) = 9;
+          id(pushed_text_timer) = 100;
+          id(sticks3_display).update();
+  - platform: template
+    id: display_text_line3
+    name: "StickS3 Display Line 3"
+    mode: text
+    update_interval: 1s
+    lambda: |-
+      return id(display_line3);
+    set_action:
+      - lambda: |-
+          id(display_line3) = x;
+          id(display_mode) = 9;
+          id(pushed_text_timer) = 100;
+          id(sticks3_display).update();
+
+interval:
+  - id: update_interval_1s
+    interval: 1s
+    then:
+      - lambda: |-
+          // 1. Pushed text timer
+          if (id(pushed_text_timer) > 0) {
+            id(pushed_text_timer)--;
+            if (id(pushed_text_timer) == 0 && !id(voice_listening)) {
+              id(display_mode) = 0;
+            }
+          }
+          // 2. Display sleep management
+          if (!id(voice_listening) && id(display_mode) != 1 && id(display_mode) != 2) {
+            uint8_t accel_data[6];
+            bool motion_detected = false;
+            uint8_t reg = 0x3B;
+            if (id(bsp_i2c).write(0x68, &reg, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
+              delay(1);
+              if (id(bsp_i2c).read(0x68, accel_data, 6) == esphome::i2c::ErrorCode::ERROR_OK) {
+                int16_t ax = (accel_data[0] << 8) | accel_data[1];
+                int16_t ay = (accel_data[2] << 8) | accel_data[3];
+                int16_t az = (accel_data[4] << 8) | accel_data[5];
+                int delta = abs(ax - id(accel_x_prev)) +
+                            abs(ay - id(accel_y_prev)) +
+                            abs(az - id(accel_z_prev));
+                if (delta > 1600) motion_detected = true;
+                id(accel_x_prev) = ax;
+                id(accel_y_prev) = ay;
+                id(accel_z_prev) = az;
+              }
+            }
+            if (motion_detected) {
+              id(idle_counter) = 0;
+              if (!id(backlight_on)) {
+                uint8_t cmd[2];
+                cmd[0] = 0x11;
+                id(bsp_i2c).write(0x6E, cmd, 1);
+                uint8_t val;
+                if (id(bsp_i2c).read(0x6E, &val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
+                  if (!(val & 0x04)) {
+                    val |= 0x04;
+                    cmd[0] = 0x11; cmd[1] = val;
+                    id(bsp_i2c).write(0x6E, cmd, 2);
+                    delay(50);
+                  }
+                }
+                id(backlight_on) = true;
+                id(sticks3_display).update();
+              }
+            } else {
+              id(idle_counter)++;
+              if (id(idle_counter) >= 600 && id(backlight_on)) {
+                uint8_t cmd[2];
+                cmd[0] = 0x11;
+                id(bsp_i2c).write(0x6E, cmd, 1);
+                uint8_t val;
+                if (id(bsp_i2c).read(0x6E, &val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
+                  if (val & 0x04) {
+                    val &= ~0x04;
+                    cmd[0] = 0x11; cmd[1] = val;
+                    id(bsp_i2c).write(0x6E, cmd, 2);
+                  }
+                }
+                id(backlight_on) = false;
+              }
+            }
+          } else {
+            if (!id(backlight_on)) {
+              uint8_t cmd[2];
+              cmd[0] = 0x11;
+              id(bsp_i2c).write(0x6E, cmd, 1);
+              uint8_t val;
+              if (id(bsp_i2c).read(0x6E, &val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
+                if (!(val & 0x04)) {
+                  val |= 0x04;
+                  cmd[0] = 0x11; cmd[1] = val;
+                  id(bsp_i2c).write(0x6E, cmd, 2);
+                  delay(50);
+                }
+              }
+              id(backlight_on) = true;
+            }
+            id(idle_counter) = 0;
+          }
+      - component.update: sticks3_display
+
+binary_sensor:
+  - platform: gpio
+    name: "Button KEY1"
+    pin:
+      number: GPIO11
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      - lambda: |-
+          if (!id(backlight_on)) {
+            uint8_t cmd[2];
+            cmd[0] = 0x11;
+            id(bsp_i2c).write(0x6E, cmd, 1);
+            uint8_t val;
+            if (id(bsp_i2c).read(0x6E, &val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
+              if (!(val & 0x04)) {
+                val |= 0x04;
+                cmd[0] = 0x11; cmd[1] = val;
+                id(bsp_i2c).write(0x6E, cmd, 2);
+                delay(50);
+              }
+            }
+            id(backlight_on) = true;
+            id(sticks3_display).update();
+          }
+          id(idle_counter) = 0;
+      - if:
+          condition:
+            lambda: 'return id(voice_listening);'
+          then:
+            - lambda: |-
+                id(voice_listening) = false;
+                id(display_mode) = 0;
+                id(sticks3_display).update();
+            - voice_assistant.stop:
+          else:
+            - lambda: |-
+                id(voice_listening) = true;
+                id(display_mode) = 1;
+                id(sticks3_display).update();
+            - voice_assistant.start:
+      - homeassistant.event:
+          event: esphome.button_voice_trigger
+          data:
+            device: sticks3
+            button: key1
+  - platform: gpio
+    name: "Button KEY2"
+    pin:
+      number: GPIO12
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      - lambda: |-
+          if (!id(backlight_on)) {
+            uint8_t cmd[2];
+            cmd[0] = 0x11;
+            id(bsp_i2c).write(0x6E, cmd, 1);
+            uint8_t val;
+            if (id(bsp_i2c).read(0x6E, &val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
+              if (!(val & 0x04)) {
+                val |= 0x04;
+                cmd[0] = 0x11; cmd[1] = val;
+                id(bsp_i2c).write(0x6E, cmd, 2);
+                delay(50);
+              }
+            }
+            id(backlight_on) = true;
+            id(sticks3_display).update();
+          }
+          id(idle_counter) = 0;
+      - if:
+          condition:
+            lambda: 'return id(voice_listening);'
+          then:
+            - lambda: |-
+                id(voice_listening) = false;
+                id(display_mode) = 0;
+                id(sticks3_display).update();
+            - voice_assistant.stop:
+          else:
+            - lambda: |-
+                id(voice_listening) = true;
+                id(display_mode) = 1;
+                id(sticks3_display).update();
+            - voice_assistant.start:
+      - homeassistant.event:
+          event: esphome.button_voice_trigger
+          data:
+            device: sticks3
+            button: key2
+
+# Backlight state sensor
+sensor:
+  - platform: template
+    name: "StickS3 Backlight"
+    id: backlight_sensor
+    lambda: |-
+      return id(backlight_on) ? 1.0f : 0.0f;
+    update_interval: 1s
+    accuracy_decimals: 0

@@ -1,0 +1,165 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    - priority: 500
+      then:
+        - lambda: |-
+            std::array<uint8_t, 2> d1 = {0x09, 0x00};
+            id(bsp_i2c).write(0x6E, d1.data(), d1.size());
+            delay(50);
+            std::array<uint8_t, 2> d2 = {0x16, 0x00};
+            id(bsp_i2c).write(0x6E, d2.data(), d2.size());
+            delay(10);
+            std::array<uint8_t, 2> d3 = {0x10, 0x04};
+            id(bsp_i2c).write(0x6E, d3.data(), d3.size());
+            delay(10);
+            std::array<uint8_t, 2> d4 = {0x11, 0x04};
+            id(bsp_i2c).write(0x6E, d4.data(), d4.size());
+            delay(100);
+            ESP_LOGI("m5pm1", "L3B init done");
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+i2c:
+  - id: bsp_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: false
+
+spi:
+  clk_pin: GPIO40
+  mosi_pin: GPIO39
+
+display:
+  - platform: st7789v
+    model: Custom
+    width: 135
+    height: 240
+    offset_width: 52
+    offset_height: 40
+    cs_pin: GPIO41
+    dc_pin: GPIO45
+    reset_pin: GPIO21
+    backlight_pin: GPIO38
+    rotation: 90°
+    update_interval: 1s
+    id: sticks3_display
+    pages:
+      - id: page_main
+        lambda: |-
+          it.fill(Color(5, 5, 15));
+          it.printf(0, 10, id(font_sm), Color(100, 200, 255), "WiFi: %d%%", (int)(id(wifi_rssi).state * 100));
+          it.printf(0, 30, id(font_sm), Color(100, 200, 255), "Uptime: %d min", (int)(id(dev_uptime).state / 60));
+      - id: page_buttons
+        lambda: |-
+          it.fill(Color(5, 5, 15));
+          it.printf(0, 10, id(font_sm), Color(255, 200, 100), "Button Test");
+          it.printf(0, 40, id(font_sm), Color(200, 255, 100), "KEY1: %s", id(btn1).state ? "PRESS" : "-----");
+          it.printf(0, 60, id(font_sm), Color(200, 255, 100), "KEY2: %s", id(btn2).state ? "PRESS" : "-----");
+          it.printf(0, 90, id(font_sm), Color(150, 150, 150), "Press count:");
+          it.printf(0, 110, id(font_sm), Color(150, 150, 150), "KEY1: %d", (int)id(btn1_count).state);
+          it.printf(0, 130, id(font_sm), Color(150, 150, 150), "KEY2: %d", (int)id(btn2_count).state);
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_sm
+    size: 16
+    glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+
+output:
+  - platform: gpio
+    id: led_builtin
+    pin: GPIO10
+
+light:
+  - platform: binary
+    id: led
+    output: led_builtin
+
+sensor:
+  - platform: wifi_signal
+    id: wifi_rssi
+    name: "WiFi Signal"
+    update_interval: 10s
+  - platform: uptime
+    id: dev_uptime
+    name: "Uptime"
+    update_interval: 10s
+  - platform: template
+    id: btn1_count
+    name: "KEY1 Count"
+    update_interval: never
+    accuracy_decimals: 0
+  - platform: template
+    id: btn2_count
+    name: "KEY2 Count"
+    update_interval: never
+    accuracy_decimals: 0
+
+binary_sensor:
+  - platform: gpio
+    id: btn1
+    name: "KEY1"
+    pin:
+      number: GPIO0
+      mode: INPUT_PULLUP
+      inverted: true
+    filters:
+      - delayed_on: 50ms
+    on_press:
+      - sensor.template.publish:
+          id: btn1_count
+          state: !lambda |-
+            return id(btn1_count).state + 1;
+      - homeassistant.event:
+          event: esphome.button_press
+          data:
+            device: sticks3
+            button: KEY1
+  - platform: gpio
+    id: btn2
+    name: "KEY2"
+    pin:
+      number: GPIO2
+      mode: INPUT_PULLUP
+      inverted: true
+    filters:
+      - delayed_on: 50ms
+    on_press:
+      - sensor.template.publish:
+          id: btn2_count
+          state: !lambda |-
+            return id(btn2_count).state + 1;
+      - homeassistant.event:
+          event: esphome.button_press
+          data:
+            device: sticks3
+            button: KEY2

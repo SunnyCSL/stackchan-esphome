@@ -1,0 +1,29 @@
+esphome:
+  name: sticks3
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  ap:
+    ssid: "StickS3 Fallback"
+    password: "stackchan123"
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+web_server:
+  port: 80
+
+logger:
+  level: DEBUG
+
+safe_mode:

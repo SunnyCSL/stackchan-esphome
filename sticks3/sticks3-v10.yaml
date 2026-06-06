@@ -1,0 +1,143 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    - priority: 200
+      then:
+        - delay: 200ms
+        - output.turn_on: bl_pin
+        - component.update: sticks3_display
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_FLASH_SIZE: "8388608"
+      CONFIG_PARTITION_TABLE_CUSTOM: "y"
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+spi:
+  clk_pin: GPIO40
+  mosi_pin: GPIO39
+
+time:
+  - platform: homeassistant
+    id: esptime
+
+output:
+  - platform: gpio
+    pin: GPIO38
+    id: bl_pin
+
+# ── Audio (I2S) ──
+i2s_audio:
+  i2s_lrclk_pin: GPIO15
+  i2s_bclk_pin: GPIO17
+  i2s_mclk_pin: GPIO18
+
+microphone:
+  - platform: i2s_audio
+    id: mic_a
+    adc_type: external
+    i2s_din_pin: GPIO16
+    pdm: false
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: stereo
+
+speaker:
+  - platform: i2s_audio
+    id: speaker_a
+    dac_type: external
+    i2s_dout_pin: GPIO14
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: mono
+
+# ── Voice Assistant (button triggered, no wake word) ──
+voice_assistant:
+  microphone: mic_a
+  speaker: speaker_a
+  use_wake_word: false
+  on_start:
+    - logger.log: "Voice assistant started via button"
+  on_end:
+    - logger.log: "Voice assistant ended"
+  on_error:
+    - logger.log: "Voice assistant error"
+
+# ── Display (ST7789P3, 135x240) ──
+display:
+  - platform: st7789v
+    model: TTGO TDisplay 135x240
+    cs_pin: GPIO41
+    dc_pin: GPIO45
+    reset_pin: GPIO21
+    rotation: 90°
+    update_interval: 10s
+    id: sticks3_display
+    pages:
+      - id: page_main
+        lambda: |-
+          it.fill(Color(5, 5, 15));
+          it.strftime(0, 0, id(font_md), Color::WHITE, TextAlign::TOP_LEFT, "%H:%M", id(esptime).now());
+          it.printf(0, 30, id(font_sm), Color(100, 200, 255), "StickS3 v10");
+          it.printf(0, 50, id(font_sm), Color(80, 80, 80), "Press KEY1 -> talk");
+
+font:
+  - file: "gfonts://Figtree"
+    id: font_md
+    size: 20
+    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
+  - file: "gfonts://Figtree"
+    id: font_sm
+    size: 12
+    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
+
+binary_sensor:
+  - platform: gpio
+    name: "Button KEY1"
+    id: btn_key1
+    pin:
+      number: GPIO11
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      - if:
+          condition:
+            voice_assistant.is_running
+          then:
+            - voice_assistant.stop
+          else:
+            - voice_assistant.start
+  - platform: gpio
+    name: "Button KEY2"
+    id: btn_key2
+    pin:
+      number: GPIO12
+      mode: INPUT_PULLUP
+      inverted: true

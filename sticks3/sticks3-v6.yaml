@@ -1,0 +1,144 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      CONFIG_ESP32S3_SPIRAM_SUPPORT: "y"
+
+psram:
+  mode: quad
+  speed: 80MHz
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+time:
+  - platform: homeassistant
+    id: esptime
+
+# ── SPI (display) ──
+spi:
+  clk_pin: GPIO13
+  mosi_pin: GPIO15
+
+# ── Outputs ──
+output:
+  - platform: ledc
+    pin: GPIO4
+    inverted: false
+    id: backlight
+  - platform: ledc
+    pin: GPIO2
+    inverted: true
+    id: buzzer
+
+# ── Lights ──
+light:
+  - platform: monochromatic
+    output: backlight
+    name: "Display Backlight"
+    id: display_bl
+    restore_mode: RESTORE_DEFAULT_ON
+
+# ── Display ──
+display:
+  - platform: mipi_spi
+    model: st7789v
+    cs_pin: GPIO5
+    dc_pin: GPIO14
+    reset_pin: GPIO12
+    rotation: 90°
+    dimensions:
+      height: 240
+      width: 135
+      offset_height: 40
+      offset_width: 52
+    invert_colors: true
+    update_interval: 30s
+    id: sticks3_display
+    pages:
+      - id: page_main
+        lambda: |-
+          it.fill(Color(5, 5, 15));
+          it.strftime(0, 0, id(font_sm), Color::WHITE, TextAlign::TOP_LEFT, "%H:%M", id(esptime).now());
+          it.printf(0, 30, id(font_xs), Color(100, 200, 255), "StickS3 OK");
+
+font:
+  - file: "gfonts://Figtree"
+    id: font_sm
+    size: 16
+    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
+  - file: "gfonts://Figtree"
+    id: font_xs
+    size: 12
+    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
+
+# ── Buttons ──
+binary_sensor:
+  - platform: gpio
+    name: "Button A"
+    pin:
+      number: GPIO37
+      inverted: true
+    on_press:
+      then:
+        - display.page.show_next: sticks3_display
+        - output.turn_on: buzzer
+        - output.ledc.set_frequency:
+            id: buzzer
+            frequency: "1000Hz"
+        - output.set_level:
+            id: buzzer
+            level: "50%"
+        - delay: 50ms
+        - output.turn_off: buzzer
+
+  - platform: gpio
+    name: "Button B"
+    pin:
+      number: GPIO39
+      inverted: true
+    on_press:
+      then:
+        - output.turn_on: buzzer
+        - output.ledc.set_frequency:
+            id: buzzer
+            frequency: "1000Hz"
+        - output.set_level:
+            id: buzzer
+            level: "50%"
+    on_release:
+      then:
+        - output.turn_off: buzzer
+
+  - platform: gpio
+    name: "Power Button"
+    pin:
+      number: GPIO35
+      inverted: true

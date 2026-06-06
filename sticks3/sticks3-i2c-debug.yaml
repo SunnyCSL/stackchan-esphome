@@ -1,0 +1,70 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    - priority: 500
+      then:
+        - lambda: |-
+            // Debug: enable M5PM1 L3B and scan I2C
+            std::array<uint8_t, 2> d1 = {0x09, 0x00};
+            auto err = id(bsp_i2c).write(0x6E, d1.data(), d1.size());
+            ESP_LOGI("m5pm1", "reg 0x09 write: %d", (int)err);
+            delay(50);
+            std::array<uint8_t, 2> d2 = {0x16, 0x00};
+            err = id(bsp_i2c).write(0x6E, d2.data(), d2.size());
+            ESP_LOGI("m5pm1", "reg 0x16 write: %d", (int)err);
+            delay(10);
+            std::array<uint8_t, 2> d3 = {0x10, 0x04};
+            err = id(bsp_i2c).write(0x6E, d3.data(), d3.size());
+            ESP_LOGI("m5pm1", "reg 0x10 write: %d", (int)err);
+            delay(10);
+            std::array<uint8_t, 2> d4 = {0x11, 0x04};
+            err = id(bsp_i2c).write(0x6E, d4.data(), d4.size());
+            ESP_LOGI("m5pm1", "reg 0x11 write: %d", (int)err);
+            delay(100);
+            ESP_LOGI("m5pm1", "L3B init done");
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+i2c:
+  - id: bsp_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: true
+
+output:
+  - platform: gpio
+    id: led_builtin
+    pin: GPIO10
+
+light:
+  - platform: binary
+    id: led
+    output: led_builtin

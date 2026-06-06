@@ -1,0 +1,241 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    - priority: 200
+      then:
+        - delay: 200ms
+        - output.turn_on: bl_pin
+        - component.update: sticks3_display
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_FLASH_SIZE: "8388608"
+      CONFIG_PARTITION_TABLE_CUSTOM: "y"
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+web_server:
+  port: 80
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+i2c:
+  - id: bsp_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: false
+
+spi:
+  clk_pin: GPIO40
+  mosi_pin: GPIO39
+
+time:
+  - platform: homeassistant
+    id: esptime
+
+# ── Audio (I2S) ──
+i2s_audio:
+  i2s_lrclk_pin: GPIO15
+  i2s_bclk_pin: GPIO17
+  i2s_mclk_pin: GPIO18
+
+microphone:
+  - platform: i2s_audio
+    id: mic_a
+    adc_type: external
+    i2s_din_pin: GPIO16
+    pdm: false
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: stereo
+
+speaker:
+  - platform: i2s_audio
+    id: speaker_a
+    dac_type: external
+    i2s_dout_pin: GPIO14
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: mono
+
+# Expose speaker to HA as media_player (announcement only, single pipeline)
+media_player:
+  - platform: speaker
+    name: "StickS3 Speaker"
+    id: sticks3_speaker
+    announcement_pipeline:
+      speaker: speaker_a
+      format: FLAC
+      sample_rate: 16000
+      num_channels: 1
+
+# ── Wake Word (local on ESP32-S3) ──
+micro_wake_word:
+  models:
+    - hey_jarvis
+  on_wake_word_detected:
+    - then:
+        - script.execute: set_listening
+        - homeassistant.event:
+            event: esphome.wake_word_detected
+            data:
+              device: sticks3
+              confidence: "0.85"
+output:
+  - platform: gpio
+    pin: GPIO38
+    id: bl_pin
+
+# ── Display (ST7789P3, 135x240, offsets x=52 y=40) ──
+display:
+  - platform: st7789v
+    model: TTGO TDisplay 135x240
+    cs_pin: GPIO41
+    dc_pin: GPIO45
+    reset_pin: GPIO21
+    rotation: 90°
+    update_interval: 10s
+    id: sticks3_display
+    pages:
+      - id: page_main
+        lambda: |-
+          it.fill(Color(5, 5, 15));
+          int mode = id(display_mode);
+          if (mode == 0) {
+            // Idle: time + status
+            it.strftime(0, 0, id(font_sm), Color(100, 200, 255), TextAlign::TOP_LEFT, "%H:%M", id(esptime).now());
+            it.printf(0, 30, id(font_xs), Color::WHITE, "Idle");
+            it.printf(0, 50, id(font_xs), Color(150, 150, 150), "%s", id(display_line1).c_str());
+          } else if (mode == 1) {
+            // Listening
+            it.printf(0, 0, id(font_sm), Color(0, 255, 100), TextAlign::TOP_LEFT, "Listening...");
+            it.printf(0, 30, id(font_xs), Color::WHITE, "%s", id(display_line1).c_str());
+            it.printf(0, 50, id(font_xs), Color(200, 200, 200), "%s", id(display_line2).c_str());
+          } else if (mode == 2) {
+            // Speaking
+            it.printf(0, 0, id(font_sm), Color(255, 180, 0), TextAlign::TOP_LEFT, "Speaking...");
+            it.printf(0, 30, id(font_xs), Color::WHITE, "%s", id(display_line1).c_str());
+            it.printf(0, 50, id(font_xs), Color(200, 200, 200), "%s", id(display_line2).c_str());
+          }
+
+font:
+  - file: "gfonts://Figtree"
+    id: font_sm
+    size: 16
+    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
+  - file: "gfonts://Figtree"
+    id: font_xs
+    size: 12
+    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
+
+globals:
+  - id: display_mode
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: display_line1
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+  - id: display_line2
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+  - id: display_line3
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+
+script:
+  - id: set_display_mode
+    parameters:
+      mode: int
+    then:
+      - lambda: |-
+          id(display_mode) = mode;
+      - component.update: sticks3_display
+  - id: set_display_text
+    parameters:
+      line1: string
+      line2: string
+      line3: string
+    then:
+      - lambda: |-
+          id(display_line1) = line1;
+          id(display_line2) = line2;
+          id(display_line3) = line3;
+      - component.update: sticks3_display
+  - id: set_idle
+    then:
+      - lambda: |-
+          id(display_mode) = 0;
+      - component.update: sticks3_display
+  - id: set_listening
+    then:
+      - lambda: |-
+          id(display_mode) = 1;
+      - component.update: sticks3_display
+  - id: set_speaking
+    then:
+      - lambda: |-
+          id(display_mode) = 2;
+      - component.update: sticks3_display
+
+interval:
+  - interval: 1s
+    then:
+      - component.update: sticks3_display
+
+binary_sensor:
+  - platform: gpio
+    name: "Button KEY1"
+    pin:
+      number: GPIO11
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      - then:
+          - script.execute: set_listening
+          - homeassistant.event:
+              event: esphome.button_voice_trigger
+              data:
+                device: sticks3
+                button: key1
+  - platform: gpio
+    name: "Button KEY2"
+    pin:
+      number: GPIO12
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      - then:
+          - script.execute: set_listening
+          - homeassistant.event:
+              event: esphome.button_voice_trigger
+              data:
+                device: sticks3
+                button: key2

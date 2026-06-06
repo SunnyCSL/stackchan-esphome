@@ -1,0 +1,95 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    priority: 600
+    then:
+      - output.turn_on: power_hold
+
+esp32:
+  board: m5stick-c
+  framework:
+    type: esp-idf
+
+psram:
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+spi:
+  clk_pin: GPIO13
+  mosi_pin: GPIO15
+
+time:
+  - platform: homeassistant
+    id: esptime
+
+# ── GPIO4 = HOLD (must be HIGH to keep power on) ──
+output:
+  - platform: gpio
+    pin: GPIO4
+    id: power_hold
+
+display:
+  - platform: st7789v
+    model: TTGO TDisplay 135x240
+    cs_pin: GPIO5
+    dc_pin: GPIO14
+    reset_pin: GPIO12
+    backlight_pin: GPIO27
+    rotation: 90°
+    update_interval: 10s
+    id: sticks3_display
+    pages:
+      - id: page_main
+        lambda: |-
+          it.fill(Color(5, 5, 15));
+          it.strftime(0, 0, id(font_sm), Color::WHITE, TextAlign::TOP_LEFT, "%H:%M", id(esptime).now());
+          it.printf(0, 30, id(font_xs), Color(100, 200, 255), "StickS3 OK v8");
+
+font:
+  - file: "gfonts://Figtree"
+    id: font_sm
+    size: 16
+    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
+  - file: "gfonts://Figtree"
+    id: font_xs
+    size: 12
+    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
+
+binary_sensor:
+  - platform: gpio
+    name: "Button A"
+    pin:
+      number: GPIO37
+      inverted: true
+  - platform: gpio
+    name: "Button B"
+    pin:
+      number: GPIO39
+      inverted: true
+  - platform: gpio
+    name: "Power Button"
+    pin:
+      number: GPIO35
+      inverted: true
