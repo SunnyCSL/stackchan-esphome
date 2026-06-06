@@ -266,15 +266,17 @@ button:
     name: "Servo Calibration"
     on_press:
       - lambda: |-
+          // Calibration: set current position as mechanical zero
           float x_zero = id(servo_x_position).state;
           float y_zero = id(servo_y_position).state;
-          id(servo_x_angle)->set_angle_offset(int(x_zero / 2.844f));
-          id(servo_y_angle)->set_angle_offset(int(y_zero / 2.844f));
-          id(use_calib_value) = true;
           id(x_servo_zero_step) = int(x_zero);
           id(y_servo_zero_step) = int(y_zero);
-      - lambda: |-
-          global_preferences->sync();
+          id(use_calib_value) = true;
+          // Apply zero: set servo to center position
+          id(servo_x_angle).publish_state(0);
+          id(servo_y_angle).publish_state(40);
+          ESP_LOGI("calib", "Calibration: x_zero=%d y_zero=%d servos→center",
+                   int(x_zero), int(y_zero));
 
 # ── Globals ──
 globals:
@@ -355,7 +357,9 @@ interval:
             static int t = 0;
             t = (t + 1) % 4;
             float angles[] = {35, 25, 35, 45};
-            id(servo_x_angle).publish_state(10 * (t % 3 - 1));
+            float base_x = id(use_calib_value) ? 0 : 0;
+            float base_y = id(use_calib_value) ? 40 : 40;
+            id(servo_x_angle).publish_state(base_x + 10 * (t % 3 - 1));
             id(servo_y_angle).publish_state(angles[t]);
           }
 
