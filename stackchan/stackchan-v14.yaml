@@ -74,9 +74,7 @@ uart:
     tx_pin:
       number: GPIO13
       allow_other_uses: true
-    rx_pin:
-      number: GPIO13
-      allow_other_uses: true
+    rx_pin: GPIO15
     baud_rate: 1000000
 
 external_components:
@@ -285,12 +283,19 @@ button:
           id(y_servo_zero_step) = int(y_zero);
           id(use_calib_value) = true;
           // Apply zero: command servo hardware via make_call
-          auto call_x = id(servo_x_angle).make_call();
-          call_x.set_value(0);
-          call_x.perform();
-          auto call_y = id(servo_y_angle).make_call();
-          call_y.set_value(40);
-          call_y.perform();
+          {
+            auto call_x = id(servo_x_angle).make_call();
+            call_x.set_value(0);
+            call_x.perform();
+          }
+          {
+            auto call_y = id(servo_y_angle).make_call();
+            call_y.set_value(40);
+            call_y.perform();
+          }
+          // Re-enable torque after move (move_angle disables it)
+          id(x_servo).write_torque_enable(true);
+          id(y_servo).write_torque_enable(true);
           ESP_LOGI("calib", "Calibration: x_zero=%d y_zero=%d servos→center",
                    int(x_zero), int(y_zero));
 
