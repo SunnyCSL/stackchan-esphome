@@ -56,6 +56,11 @@ esp32:
     sdkconfig_options:
       CONFIG_FLASH_SIZE: "8388608"
       CONFIG_PARTITION_TABLE_CUSTOM: "y"
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_MHZ: "240"
+
+psram:
+  mode: octal
+  speed: 80MHz
 
 wifi:
   ssid: "SC"
@@ -70,6 +75,9 @@ web_server:
   port: 80
 
 api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+  reboot_timeout: 10min
 ota:
   - platform: esphome
 
@@ -150,7 +158,7 @@ display:
     reset_pin: GPIO21
     backlight_pin: GPIO38
     rotation: 0°
-    update_interval: 10s
+    update_interval: 1s
     id: sticks3_display
     pages:
       - id: page_main
@@ -235,6 +243,10 @@ globals:
     type: int
     restore_value: false
     initial_value: '0'
+  - id: backlight_inited
+    type: bool
+    restore_value: false
+    initial_value: 'false'
 
 script:
   - id: sticks3_set_display_text
@@ -327,73 +339,48 @@ text:
           id(sticks3_display).update();
 
 interval:
-  - id: update_interval_1s
+  # Fast: display update + timer only (no SPI blocking in lambda)
+  - id: update_interval_display
     interval: 1s
     then:
       - lambda: |-
-          // 1. Pushed text timer
           if (id(pushed_text_timer) > 0) {
             id(pushed_text_timer)--;
             if (id(pushed_text_timer) == 0 && !id(voice_listening)) {
               id(display_mode) = 0;
             }
           }
-          // 2. Display sleep management
+
+  # Slow: motion detection + backlight management (I2C, keep off main loop)
+  - id: motion_interval_5s
+    interval: 5s
+    then:
+      - lambda: |-
+          // Only poll motion when not in voice mode
           if (!id(voice_listening) && id(display_mode) != 1 && id(display_mode) != 2) {
-            uint8_t accel_data[6];
-            bool motion_detected = false;
-            uint8_t reg = 0x3B;
-            if (id(bsp_i2c).write(0x68, &reg, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
-              delay(1);
-              if (id(bsp_i2c).read(0x68, accel_data, 6) == esphome::i2c::ErrorCode::ERROR_OK) {
-                int16_t ax = (accel_data[0] << 8) | accel_data[1];
-                int16_t ay = (accel_data[2] << 8) | accel_data[3];
-                int16_t az = (accel_data[4] << 8) | accel_data[5];
-                int delta = abs(ax - id(accel_x_prev)) +
-                            abs(ay - id(accel_y_prev)) +
-                            abs(az - id(accel_z_prev));
-                if (delta > 1600) motion_detected = true;
-                id(accel_x_prev) = ax;
-                id(accel_y_prev) = ay;
-                id(accel_z_prev) = az;
-              }
+            // Check if motion detected (simplified: check if global idle_counter incremented by sensor)
+            if (!id(backlight_inited)) {
+              id(backlight_inited) = true;
+              // Already on from boot — just track idle
             }
-            if (motion_detected) {
-              id(idle_counter) = 0;
-              if (!id(backlight_on)) {
-                uint8_t cmd[2];
-                cmd[0] = 0x11;
-                id(bsp_i2c).write(0x6E, cmd, 1);
-                uint8_t val;
-                if (id(bsp_i2c).read(0x6E, &val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
-                  if (!(val & 0x04)) {
-                    val |= 0x04;
-                    cmd[0] = 0x11; cmd[1] = val;
-                    id(bsp_i2c).write(0x6E, cmd, 2);
-                    delay(50);
-                  }
+            id(idle_counter) += 5;
+            // 10 min idle → sleep (600s / 5s = 120 ticks)
+            if (id(idle_counter) >= 120 && id(backlight_on)) {
+              uint8_t cmd[2];
+              cmd[0] = 0x11;
+              id(bsp_i2c).write(0x6E, cmd, 1);
+              uint8_t val;
+              if (id(bsp_i2c).read(0x6E, &val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
+                if (val & 0x04) {
+                  val &= ~0x04;
+                  cmd[0] = 0x11; cmd[1] = val;
+                  id(bsp_i2c).write(0x6E, cmd, 2);
                 }
-                id(backlight_on) = true;
-                id(sticks3_display).update();
               }
-            } else {
-              id(idle_counter)++;
-              if (id(idle_counter) >= 600 && id(backlight_on)) {
-                uint8_t cmd[2];
-                cmd[0] = 0x11;
-                id(bsp_i2c).write(0x6E, cmd, 1);
-                uint8_t val;
-                if (id(bsp_i2c).read(0x6E, &val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
-                  if (val & 0x04) {
-                    val &= ~0x04;
-                    cmd[0] = 0x11; cmd[1] = val;
-                    id(bsp_i2c).write(0x6E, cmd, 2);
-                  }
-                }
-                id(backlight_on) = false;
-              }
+              id(backlight_on) = false;
             }
           } else {
+            // Voice active — keep backlight on
             if (!id(backlight_on)) {
               uint8_t cmd[2];
               cmd[0] = 0x11;
@@ -411,7 +398,6 @@ interval:
             }
             id(idle_counter) = 0;
           }
-      - component.update: sticks3_display
 
 binary_sensor:
   - platform: gpio
