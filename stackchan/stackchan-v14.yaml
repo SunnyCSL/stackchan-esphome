@@ -66,9 +66,18 @@ spi:
     mosi_pin: GPIO37
 
 uart:
-  tx_pin: GPIO6
-  rx_pin: GPIO7
-  baud_rate: 1000000
+  - id: uart_audio
+    tx_pin: GPIO6
+    rx_pin: GPIO7
+    baud_rate: 1000000
+  - id: uart_servo
+    tx_pin:
+      number: GPIO13
+      allow_other_uses: true
+    rx_pin:
+      number: GPIO13
+      allow_other_uses: true
+    baud_rate: 1000000
 
 external_components:
   - source: github://m5stack/esphome-yaml/components
@@ -95,7 +104,9 @@ speaker:
   - platform: i2s_audio
     id: speaker_a
     dac_type: external
-    i2s_dout_pin: GPIO13
+    i2s_dout_pin:
+      number: GPIO13
+      allow_other_uses: true
     sample_rate: 16000
     bits_per_sample: 16bit
     channel: stereo
@@ -191,8 +202,9 @@ light:
           name: Rainbow
     restore_mode: ALWAYS_OFF
 
-# ── SCS9009 Servo Bus
+# ── SCS9009 Servo Bus (half-duplex on GPIO15)
 scs9009:
+  uart_id: uart_servo
 
 # ── IR Transmitter
 remote_transmitter:
@@ -272,9 +284,13 @@ button:
           id(x_servo_zero_step) = int(x_zero);
           id(y_servo_zero_step) = int(y_zero);
           id(use_calib_value) = true;
-          // Apply zero: set servo to center position
-          id(servo_x_angle).publish_state(0);
-          id(servo_y_angle).publish_state(40);
+          // Apply zero: command servo hardware via make_call
+          auto call_x = id(servo_x_angle).make_call();
+          call_x.set_value(0);
+          call_x.perform();
+          auto call_y = id(servo_y_angle).make_call();
+          call_y.set_value(40);
+          call_y.perform();
           ESP_LOGI("calib", "Calibration: x_zero=%d y_zero=%d servos→center",
                    int(x_zero), int(y_zero));
 
@@ -357,10 +373,16 @@ interval:
             static int t = 0;
             t = (t + 1) % 4;
             float angles[] = {35, 25, 35, 45};
-            float base_x = id(use_calib_value) ? 0 : 0;
-            float base_y = id(use_calib_value) ? 40 : 40;
-            id(servo_x_angle).publish_state(base_x + 10 * (t % 3 - 1));
-            id(servo_y_angle).publish_state(angles[t]);
+            {
+              auto cx = id(servo_x_angle).make_call();
+              cx.set_value(10 * (t % 3 - 1));
+              cx.perform();
+            }
+            {
+              auto cy = id(servo_y_angle).make_call();
+              cy.set_value(angles[t]);
+              cy.perform();
+            }
           }
 
 # ── Voice state control ──
