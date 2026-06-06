@@ -1,0 +1,95 @@
+esphome:
+  name: stackchan
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  ap:
+    ssid: "StackChan Fallback"
+    password: "stackchan123"
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+web_server:
+  port: 80
+
+logger:
+
+external_components:
+  - source: github://m5stack/esphome-yaml/components
+    components: [axp2101, aw9523b, m5ioe1]
+    refresh: 0s
+
+i2c:
+  id: bsp_bus
+  sda: GPIO12
+  scl: GPIO11
+  frequency: 100kHz
+  scan: true
+
+spi:
+  id: spi_bus
+  clk_pin: GPIO36
+  mosi_pin: GPIO37
+
+axp2101:
+  id: axp2101_pmu
+  i2c_id: bsp_bus
+
+aw9523b:
+  id: aw9523b_hub
+  i2c_id: bsp_bus
+  p0_drive_mode: PUSH_PULL
+  interrupt_pin: GPIO21
+
+m5ioe1:
+  id: m5ioe1_hub
+  i2c_id: bsp_bus
+  reset: true
+
+output:
+  - platform: axp2101
+    type: range
+    channel: DLDO1
+    id: lcd_backlight_output
+    min_voltage: 2600
+    max_voltage: 3300
+
+light:
+  - platform: m5ioe1
+    id: stackchan_light_bar
+    name: "StackChan Light Bar"
+    num_led: 12
+  - platform: monochromatic
+    id: lcd_backlight
+    name: "LCD Backlight"
+    output: lcd_backlight_output
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 250ms
+
+display:
+  - platform: mipi_spi
+    model: M5CORE
+    dc_pin: GPIO35
+    reset_pin:
+      aw9523b_id: aw9523b_hub
+      number: 9
+    cs_pin:
+      number: GPIO3
+      ignore_strapping_warning: true
+    data_rate: 40MHz
+    invert_colors: true
+    id: m5cores3_lcd
+    show_test_card: true
+
+safe_mode:

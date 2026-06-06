@@ -1,0 +1,208 @@
+substitutions:
+  name: stackchan
+  friendly_name: StackChan
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    - priority: 600
+      then:
+        - light.turn_on:
+            id: lcd_backlight
+            brightness: 80%
+    - priority: 200
+      then:
+        - delay: 500ms
+        - component.update: m5cores3_lcd
+
+esp32:
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+      CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
+
+psram:
+  mode: quad
+  speed: 80MHz
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.180
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+time:
+  - platform: homeassistant
+    id: esptime
+
+i2c:
+  - id: bsp_bus
+    sda: GPIO12
+    scl: GPIO11
+
+spi:
+  - id: spi_bus
+    clk_pin: GPIO36
+    mosi_pin: GPIO37
+
+external_components:
+  - source: github://m5stack/esphome-yaml/components
+    components: [axp2101, aw9523b]
+    refresh: 0s
+
+# ── Audio (I2S) ──
+i2s_audio:
+  i2s_lrclk_pin: GPIO33
+  i2s_bclk_pin: GPIO34
+  i2s_mclk_pin: GPIO0
+
+microphone:
+  - platform: i2s_audio
+    id: mic_a
+    adc_type: external
+    i2s_din_pin: GPIO14
+    pdm: false
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: stereo
+
+speaker:
+  - platform: i2s_audio
+    id: speaker_a
+    dac_type: external
+    i2s_dout_pin: GPIO13
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: stereo
+
+# ── Voice Assistant (button triggered, no wake word yet) ──
+voice_assistant:
+  microphone: mic_a
+  speaker: speaker_a
+  use_wake_word: false
+  on_start:
+    - logger.log: "Voice started"
+    - script.execute: set_listening
+  on_end:
+    - logger.log: "Voice ended"
+    - script.execute: set_idle
+
+# ── PMU (essential) ──
+axp2101:
+  id: axp2101_pmu
+  i2c_id: bsp_bus
+
+# ── IO Expander (needed for display reset) ──
+aw9523b:
+  id: aw9523b_hub
+  i2c_id: bsp_bus
+  p0_drive_mode: PUSH_PULL
+  interrupt_pin: GPIO21
+
+# ── Power Rails ──
+output:
+  - platform: axp2101
+    type: range
+    channel: DLDO1
+    id: lcd_backlight_output
+    min_voltage: 2600
+    max_voltage: 3300
+  - platform: axp2101
+    channel: ALDO1
+    voltage: 1800
+  - platform: axp2101
+    channel: ALDO2
+    voltage: 3300
+  - platform: axp2101
+    channel: BLDO1
+    voltage: 2800
+  - platform: axp2101
+    channel: BLDO2
+    voltage: 1500
+  - platform: axp2101
+    channel: DCDC1
+    voltage: 3300
+  - platform: axp2101
+    channel: DCDC3
+    voltage: 3300
+
+switch:
+  - platform: gpio
+    name: "BUS_OUT_EN"
+    pin:
+      aw9523b_id: aw9523b_hub
+      number: 1
+    restore_mode: ALWAYS_ON
+  - platform: gpio
+    name: "BOOST_EN"
+    pin:
+      aw9523b_id: aw9523b_hub
+      number: 15
+    restore_mode: RESTORE_DEFAULT_ON
+
+# ── Lights ──
+light:
+  - platform: monochromatic
+    id: lcd_backlight
+    name: "LCD Backlight"
+    output: lcd_backlight_output
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 250ms
+
+# ── Scripts ──
+script:
+  - id: set_idle
+    then:
+      - component.update: m5cores3_lcd
+  - id: set_listening
+    then:
+      - component.update: m5cores3_lcd
+
+# ── Display (Minimal) ──
+display:
+  - platform: ili9xxx
+    model: ILI9342
+    dc_pin: GPIO35
+    reset_pin:
+      aw9523b_id: aw9523b_hub
+      number: 9
+    cs_pin:
+      number: GPIO3
+      ignore_strapping_warning: true
+    data_rate: 40MHz
+    update_interval: 30s
+    invert_colors: true
+    id: m5cores3_lcd
+    pages:
+      - id: page_main
+        lambda: |-
+          it.fill(Color(6, 6, 18));
+          it.strftime(0, 0, id(font_sm), Color::WHITE, TextAlign::TOP_LEFT, "%H:%M", id(esptime).now());
+          it.printf(0, 30, id(font_sm), Color(40, 200, 220), "StackChan MINIMAL");
+          it.printf(0, 50, id(font_sm), Color(80, 80, 80), "Stable test");
+
+font:
+  - file: "gfonts://Figtree"
+    id: font_sm
+    size: 16
+    glyphs: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%'

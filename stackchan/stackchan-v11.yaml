@@ -1,0 +1,359 @@
+substitutions:
+  name: stackchan
+  friendly_name: StackChan
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  min_version: 2026.3.0
+  on_boot:
+    - priority: 600
+      then:
+        - light.turn_on:
+            id: lcd_backlight
+            brightness: 80%
+    - priority: 200
+      then:
+        - delay: 500ms
+        - component.update: m5cores3_lcd
+
+esp32:
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+      CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
+
+psram:
+  mode: quad
+  speed: 80MHz
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.180
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+time:
+  - platform: homeassistant
+    id: esptime
+
+i2c:
+  - id: bsp_bus
+    sda: GPIO12
+    scl: GPIO11
+
+spi:
+  - id: spi_bus
+    clk_pin: GPIO36
+    mosi_pin: GPIO37
+
+external_components:
+  - source: github://m5stack/esphome-yaml/components
+    components: [axp2101, aw9523b, m5ioe1, scs9009, ftservo, si12t]
+    refresh: 1h
+
+# ── PMU ──
+axp2101:
+  id: axp2101_pmu
+  i2c_id: bsp_bus
+
+# ── IO Expander ──
+aw9523b:
+  id: aw9523b_hub
+  i2c_id: bsp_bus
+  p0_drive_mode: PUSH_PULL
+  interrupt_pin: GPIO21
+
+# ── RGB LED Bar ──
+m5ioe1:
+  id: m5ioe1_hub
+  i2c_id: bsp_bus
+  reset: true
+
+# ── Power Rails ──
+output:
+  - platform: axp2101
+    type: range
+    channel: DLDO1
+    id: lcd_backlight_output
+    min_voltage: 2600
+    max_voltage: 3300
+  - platform: axp2101
+    channel: ALDO1
+    voltage: 1800
+  - platform: axp2101
+    channel: ALDO2
+    voltage: 3300
+  - platform: axp2101
+    channel: BLDO1
+    voltage: 2800
+  - platform: axp2101
+    channel: BLDO2
+    voltage: 1500
+  - platform: axp2101
+    channel: DCDC1
+    voltage: 3300
+  - platform: axp2101
+    channel: DCDC3
+    voltage: 3300
+
+# ── Switches (BUS_OUT_EN + BOOST_EN needed for display) ──
+switch:
+  - platform: gpio
+    name: "BUS_OUT_EN"
+    pin:
+      aw9523b_id: aw9523b_hub
+      number: 1
+    restore_mode: RESTORE_DEFAULT_ON
+  - platform: gpio
+    name: "BOOST_EN"
+    pin:
+      aw9523b_id: aw9523b_hub
+      number: 15
+    restore_mode: RESTORE_DEFAULT_ON
+
+# ── Lights ──
+light:
+  - platform: monochromatic
+    id: lcd_backlight
+    name: "LCD Backlight"
+    output: lcd_backlight_output
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 250ms
+  - platform: m5ioe1
+    id: stackchan_light_bar
+    name: "StackChan Light Bar"
+    num_led: 12
+    effects:
+      - random:
+          name: Random
+      - addressable_rainbow:
+          name: Rainbow
+    restore_mode: ALWAYS_OFF
+
+# ── Globals for animation state ──
+globals:
+  - id: eye_phase
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: is_listening
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: is_speaking
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+# ── Animation timer (every 700ms) ──
+interval:
+  - interval: 700ms
+    then:
+      - lambda: |-
+          id(eye_phase) = (id(eye_phase) + 1) % 16;
+      - component.update: m5cores3_lcd
+
+# ── Voice state control ──
+script:
+  - id: set_idle
+    then:
+      - lambda: |-
+          id(is_listening) = false;
+          id(is_speaking) = false;
+      - component.update: m5cores3_lcd
+  - id: set_listening
+    then:
+      - lambda: |-
+          id(is_listening) = true;
+          id(is_speaking) = false;
+          id(eye_phase) = 0;
+      - component.update: m5cores3_lcd
+  - id: set_speaking
+    then:
+      - lambda: |-
+          id(is_listening) = false;
+          id(is_speaking) = true;
+          id(eye_phase) = 0;
+      - component.update: m5cores3_lcd
+
+# ── Display ──
+display:
+  - platform: mipi_spi
+    model: ILI9342
+    transform:
+      mirror_x: false
+      mirror_y: false
+      swap_xy: false
+    dc_pin: GPIO35
+    reset_pin:
+      aw9523b_id: aw9523b_hub
+      number: 9
+    cs_pin:
+      number: GPIO3
+      ignore_strapping_warning: true
+    data_rate: 40MHz
+    update_interval: never
+    invert_colors: true
+    id: m5cores3_lcd
+    pages:
+      - id: page_main
+        lambda: |-
+          int phase = id(eye_phase);
+          bool listening = id(is_listening);
+          bool speaking = id(is_speaking);
+
+          // ── Background ──
+          auto bg = Color(6, 6, 18);
+          auto bg_dim = Color(10, 10, 28);
+          auto cyan = Color(40, 200, 220);
+          auto cyan_dim = Color(20, 100, 120);
+          auto pupil_color = Color(20, 220, 200);
+          auto white = Color(220, 240, 255);
+          auto accent = Color(60, 80, 180);
+          auto mouth_color = Color(30, 180, 200);
+          auto glow = Color(15, 50, 80);
+
+          if (listening) {
+            bg = Color(8, 10, 28);
+            pupil_color = Color(50, 255, 100);
+            cyan = Color(60, 255, 120);
+            mouth_color = Color(50, 255, 100);
+            glow = Color(20, 80, 60);
+          } else if (speaking) {
+            bg = Color(12, 8, 30);
+            pupil_color = Color(255, 180, 50);
+            cyan = Color(255, 200, 60);
+            mouth_color = Color(255, 160, 40);
+            glow = Color(60, 30, 15);
+          }
+
+          it.fill(bg);
+
+          // ── Glow behind eyes ──
+          it.filled_circle(95, 105, 45, glow);
+          it.filled_circle(225, 105, 45, glow);
+
+          // ── Eye offsets from phase ──
+          // phase cycle (16 steps): 
+          //   0-3: center, 4: look right, 5-8: center, 9: blink, 10-13: center, 14: look left, 15: blink
+          int px = 0, py = 0;
+          bool blink = false;
+          int mouth_w = 50;
+
+          if (listening || speaking) {
+            px = 0; py = 2;  // eyes wide, looking slightly up at speaker
+            mouth_w = 36;
+            blink = false;
+            if (speaking && (phase % 3 == 0)) mouth_w = 60;
+          } else {
+            switch (phase) {
+              case 4:  px = 12; py = -3; break;   // look right
+              case 14: px = -12; py = -3; break;  // look left
+              case 9:  blink = true; break;
+              case 15: blink = true; break;
+              default: px = 0; py = 0; break;
+            }
+            // occasional blink during center phases
+            if (phase == 2 || phase == 7) blink = true;
+            mouth_w = 50;
+          }
+
+          // ── Left Eye (angular/mechanical) ──
+          int le_x = 55, le_y = 70;  // top-left corner
+          int ew = 70, eh = 65;      // eye size
+
+          if (blink) {
+            // Blink: thin glowing line
+            it.filled_rectangle(le_x, le_y + eh/2 - 3, ew, 6, cyan_dim);
+            it.filled_rectangle(le_x + 4, le_y + eh/2 - 1, ew - 8, 2, cyan);
+          } else {
+            // Outer socket (dark with border)
+            it.filled_rectangle(le_x, le_y, ew, eh, Color(15, 18, 40));
+            // Top border glow
+            it.filled_rectangle(le_x + 2, le_y, ew - 4, 4, cyan_dim);
+            it.filled_rectangle(le_x + 6, le_y, ew - 12, 2, cyan);
+            // Bottom border
+            it.filled_rectangle(le_x + 2, le_y + eh - 4, ew - 4, 4, cyan_dim);
+            // Left/right accents
+            it.filled_rectangle(le_x, le_y + 4, 4, eh - 8, accent);
+            it.filled_rectangle(le_x + ew - 4, le_y + 4, 4, eh - 8, accent);
+
+            // Inner dark
+            it.filled_rectangle(le_x + 6, le_y + 8, ew - 12, eh - 16, Color(8, 10, 28));
+
+            // Pupil (bright, moves with px/py)
+            int pl_x = le_x + ew/2 - 8 + px;
+            int pl_y = le_y + eh/2 - 10 + py;
+            int pw = listening ? 20 : 16;
+            int ph = listening ? 24 : 20;
+            it.filled_rectangle(pl_x, pl_y, pw, ph, pupil_color);
+            // Pupil highlight
+            it.filled_rectangle(pl_x + 3, pl_y + 2, pw/3, ph/3, white);
+          }
+
+          // ── Right Eye ──
+          int re_x = 195, re_y = 70;
+
+          if (blink) {
+            it.filled_rectangle(re_x, re_y + eh/2 - 3, ew, 6, cyan_dim);
+            it.filled_rectangle(re_x + 4, re_y + eh/2 - 1, ew - 8, 2, cyan);
+          } else {
+            it.filled_rectangle(re_x, re_y, ew, eh, Color(15, 18, 40));
+            it.filled_rectangle(re_x + 2, re_y, ew - 4, 4, cyan_dim);
+            it.filled_rectangle(re_x + 6, re_y, ew - 12, 2, cyan);
+            it.filled_rectangle(re_x + 2, re_y + eh - 4, ew - 4, 4, cyan_dim);
+            it.filled_rectangle(re_x, re_y + 4, 4, eh - 8, accent);
+            it.filled_rectangle(re_x + ew - 4, re_y + 4, 4, eh - 8, accent);
+            it.filled_rectangle(re_x + 6, re_y + 8, ew - 12, eh - 16, Color(8, 10, 28));
+
+            int pr_x = re_x + ew/2 - 8 + px;
+            int pr_y = re_y + eh/2 - 10 + py;
+            int pw2 = listening ? 20 : 16;
+            int ph2 = listening ? 24 : 20;
+            it.filled_rectangle(pr_x, pr_y, pw2, ph2, pupil_color);
+            it.filled_rectangle(pr_x + 3, pr_y + 2, pw2/3, ph2/3, white);
+          }
+
+          // ── Mouth ──
+          int mx = 160 - mouth_w/2;
+          int my = 175;
+          int mh = speaking ? 12 : 6;
+
+          // Mouth glow
+          it.filled_rectangle(mx - 4, my - 2, mouth_w + 8, mh + 4, glow);
+          // Mouth bar
+          it.filled_rectangle(mx, my, mouth_w, mh, mouth_color);
+
+          // Mouth corner bolts
+          it.filled_rectangle(mx - 6, my - 2, 6, mh + 4, accent);
+          it.filled_rectangle(mx + mouth_w, my - 2, 6, mh + 4, accent);
+
+          // ── Time ──
+          auto t = id(esptime).now();
+          it.strftime(5, 218, id(font_sm), Color(50, 50, 80), "%H:%M", t);
+
+font:
+  - file: "gfonts://Figtree"
+    id: font_sm
+    size: 14
+    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"

@@ -1,0 +1,69 @@
+substitutions:
+  name: test-scripts
+  friendly_name: TestScripts
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  min_version: 2026.3.0
+
+esp32:
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: quad
+  speed: 80MHz
+
+wifi:
+  ssid: "test"
+  password: "test12345"
+
+api:
+
+ota:
+  - platform: esphome
+
+logger:
+
+script:
+  - id: set_idle
+    then:
+      - lambda: |-
+          ESP_LOGD("test", "set_idle");
+
+  - id: set_speaking
+    then:
+      - lambda: |-
+          ESP_LOGD("test", "set_speaking");
+
+  - id: set_processing
+    then:
+      - lambda: |-
+          ESP_LOGD("test", "set_processing");
+
+  - id: nod
+    then:
+      - lambda: |-
+          id(set_idle).execute();
+      - delay: 150ms
+      - delay: 100ms
+
+  - id: shake
+    then:
+      - lambda: |-
+          id(set_idle).execute();
+      - delay: 150ms
+      - delay: 100ms
+
+  - id: point_to_tv
+    then:
+      - lambda: |-
+          id(set_idle).execute();
+      - delay: 500ms
+
+  - id: look_forward
+    then:
+      - delay: 500ms
