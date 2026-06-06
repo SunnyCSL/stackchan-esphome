@@ -47,6 +47,7 @@ esphome:
       then:
         - delay: 200ms
         - component.update: sticks3_display
+        - script.execute: backlight_turn_on
 
 esp32:
   variant: esp32s3
