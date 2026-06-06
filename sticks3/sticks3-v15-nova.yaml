@@ -6,48 +6,10 @@ esphome:
   name: ${name}
   friendly_name: ${friendly_name}
   on_boot:
-    - priority: 500
-      then:
-        - lambda: |-
-            // M5PM1 @ 0x6E: enable L3B power rail for display backlight + LDOs
-            uint8_t cmd[2];
-            // 0. Enable LDO4 + LDO5 for audio periphs
-            cmd[0] = 0x12;
-            id(bsp_i2c).write(0x6E, cmd, 1);
-            uint8_t ldo_val;
-            if (id(bsp_i2c).read(0x6E, &ldo_val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
-              ldo_val |= 0xC0;
-              cmd[0] = 0x12; cmd[1] = ldo_val;
-              id(bsp_i2c).write(0x6E, cmd, 2);
-              delay(10);
-            }
-            // 1. disable idle-sleep (reg 0x09 = 0)
-            cmd[0] = 0x09; cmd[1] = 0x00;
-            id(bsp_i2c).write(0x6E, cmd, 2);
-            delay(50);
-            // 2. set PYG2 function to GPIO (reg 0x16 bits 5:4 = 00)
-            cmd[0] = 0x16;
-            id(bsp_i2c).write(0x6E, cmd, 1);
-            uint8_t func0;
-            if (id(bsp_i2c).read(0x6E, &func0, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
-              func0 &= ~0x30;
-              cmd[0] = 0x16; cmd[1] = func0;
-              id(bsp_i2c).write(0x6E, cmd, 2);
-            }
-            delay(10);
-            // 3. set PYG2 as output (reg 0x10 bit2 = 1)
-            cmd[0] = 0x10; cmd[1] = 0x04;
-            id(bsp_i2c).write(0x6E, cmd, 2);
-            delay(10);
-            // 4. PYG2 high → L3B ON (reg 0x11 bit2 = 1)
-            cmd[0] = 0x11; cmd[1] = 0x04;
-            id(bsp_i2c).write(0x6E, cmd, 2);
-            delay(100);
     - priority: 200
       then:
-        - delay: 200ms
+        - delay: 500ms
         - component.update: sticks3_display
-        - script.execute: backlight_turn_on
 
 esp32:
   variant: esp32s3
@@ -223,11 +185,6 @@ globals:
     type: int
     restore_value: false
     initial_value: '0'
-  # Display sleep / motion wake
-  - id: backlight_on
-    type: bool
-    restore_value: false
-    initial_value: 'true'
   - id: idle_counter
     type: int
     restore_value: false
@@ -259,40 +216,6 @@ script:
           id(display_mode) = 9;
           id(pushed_text_timer) = 100;
           id(sticks3_display).update();
-
-  # Backlight control via M5PM1 L3B
-  - id: backlight_turn_on
-    then:
-      - lambda: |-
-          uint8_t cmd[2];
-          cmd[0] = 0x11;
-          id(bsp_i2c).write(0x6E, cmd, 1);
-          uint8_t val;
-          if (id(bsp_i2c).read(0x6E, &val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
-            if (!(val & 0x04)) {
-              val |= 0x04;
-              cmd[0] = 0x11; cmd[1] = val;
-              id(bsp_i2c).write(0x6E, cmd, 2);
-              delay(50);
-            }
-          }
-          id(backlight_on) = true;
-          id(idle_counter) = 0;
-  - id: backlight_turn_off
-    then:
-      - lambda: |-
-          uint8_t cmd[2];
-          cmd[0] = 0x11;
-          id(bsp_i2c).write(0x6E, cmd, 1);
-          uint8_t val;
-          if (id(bsp_i2c).read(0x6E, &val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
-            if (val & 0x04) {
-              val &= ~0x04;
-              cmd[0] = 0x11; cmd[1] = val;
-              id(bsp_i2c).write(0x6E, cmd, 2);
-            }
-          }
-          id(backlight_on) = false;
 
 text:
   - platform: template
@@ -348,25 +271,21 @@ interval:
             }
           }
 
-  # Motion detection + backlight management
+  # Motion detection (track only, no I2C writes)
   - id: motion_interval_1s
     interval: 1s
     then:
       - lambda: |-
           // Check if MPU6886 sensor has valid state
           if (!id(accel_x).has_state() || !id(accel_y).has_state() || !id(accel_z).has_state()) {
-            // Sensor not ready yet
-            id(idle_counter) = 0;
             return;
           }
           float ax = id(accel_x).state;
           float ay = id(accel_y).state;
           float az = id(accel_z).state;
-          // Convert to int for comparison
           int iax = int(ax * 100);
           int iay = int(ay * 100);
           int iaz = int(az * 100);
-          // Detect motion: compare with previous values
           int dx = abs(iax - id(accel_x_prev));
           int dy = abs(iay - id(accel_y_prev));
           int dz = abs(iaz - id(accel_z_prev));
@@ -376,46 +295,13 @@ interval:
           bool motion = (dx > 8 || dy > 8 || dz > 8);
 
           if (motion || id(voice_listening) || id(display_mode) == 1 || id(display_mode) == 2) {
-            // Motion detected or voice active — reset idle counter, keep backlight on
             id(idle_counter) = 0;
-            if (!id(backlight_on)) {
-              // Wake backlight
-              uint8_t cmd[2];
-              cmd[0] = 0x11;
-              id(bsp_i2c).write(0x6E, cmd, 1);
-              uint8_t val;
-              if (id(bsp_i2c).read(0x6E, &val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
-                if (!(val & 0x04)) {
-                  val |= 0x04;
-                  cmd[0] = 0x11; cmd[1] = val;
-                  id(bsp_i2c).write(0x6E, cmd, 2);
-                  delay(50);
-                }
-              }
-              id(backlight_on) = true;
-              id(sticks3_display).update();
-            }
             return;
           }
 
-          // No motion — increment idle counter
-          // 30s idle → sleep
+          // No motion — increment idle counter (tracking only)
           if (id(idle_counter) < 30) {
             id(idle_counter)++;
-          }
-          if (id(idle_counter) >= 30 && id(backlight_on)) {
-            uint8_t cmd[2];
-            cmd[0] = 0x11;
-            id(bsp_i2c).write(0x6E, cmd, 1);
-            uint8_t val;
-            if (id(bsp_i2c).read(0x6E, &val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
-              if (val & 0x04) {
-                val &= ~0x04;
-                cmd[0] = 0x11; cmd[1] = val;
-                id(bsp_i2c).write(0x6E, cmd, 2);
-              }
-            }
-            id(backlight_on) = false;
           }
 
 binary_sensor:
@@ -427,22 +313,6 @@ binary_sensor:
       inverted: true
     on_press:
       - lambda: |-
-          if (!id(backlight_on)) {
-            uint8_t cmd[2];
-            cmd[0] = 0x11;
-            id(bsp_i2c).write(0x6E, cmd, 1);
-            uint8_t val;
-            if (id(bsp_i2c).read(0x6E, &val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
-              if (!(val & 0x04)) {
-                val |= 0x04;
-                cmd[0] = 0x11; cmd[1] = val;
-                id(bsp_i2c).write(0x6E, cmd, 2);
-                delay(50);
-              }
-            }
-            id(backlight_on) = true;
-            id(sticks3_display).update();
-          }
           id(idle_counter) = 0;
       - if:
           condition:
@@ -470,22 +340,6 @@ binary_sensor:
       inverted: true
     on_press:
       - lambda: |-
-          if (!id(backlight_on)) {
-            uint8_t cmd[2];
-            cmd[0] = 0x11;
-            id(bsp_i2c).write(0x6E, cmd, 1);
-            uint8_t val;
-            if (id(bsp_i2c).read(0x6E, &val, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
-              if (!(val & 0x04)) {
-                val |= 0x04;
-                cmd[0] = 0x11; cmd[1] = val;
-                id(bsp_i2c).write(0x6E, cmd, 2);
-                delay(50);
-              }
-            }
-            id(backlight_on) = true;
-            id(sticks3_display).update();
-          }
           id(idle_counter) = 0;
       - if:
           condition:
@@ -506,15 +360,8 @@ binary_sensor:
             device: sticks3
             button: key2
 
-# Backlight state sensor
+# MPU6886 Accelerometer
 sensor:
-  - platform: template
-    name: "StickS3 Backlight"
-    id: backlight_sensor
-    lambda: |-
-      return id(backlight_on) ? 1.0f : 0.0f;
-    update_interval: 1s
-    accuracy_decimals: 0
   - platform: mpu6886
     id: imu
     i2c_id: bsp_i2c
