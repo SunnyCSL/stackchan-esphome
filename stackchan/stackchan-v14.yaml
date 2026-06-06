@@ -66,15 +66,10 @@ spi:
     mosi_pin: GPIO37
 
 uart:
-  - id: uart_audio
+  # Servo UART — Port B on CoreS3
+  - id: uart_servo
     tx_pin: GPIO6
     rx_pin: GPIO7
-    baud_rate: 1000000
-  - id: uart_servo
-    tx_pin:
-      number: GPIO13
-      allow_other_uses: true
-    rx_pin: GPIO15
     baud_rate: 1000000
 
 external_components:
@@ -102,9 +97,7 @@ speaker:
   - platform: i2s_audio
     id: speaker_a
     dac_type: external
-    i2s_dout_pin:
-      number: GPIO13
-      allow_other_uses: true
+    i2s_dout_pin: GPIO13
     sample_rate: 16000
     bits_per_sample: 16bit
     channel: stereo
