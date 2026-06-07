@@ -6,62 +6,48 @@ esphome:
   name: ${name}
   friendly_name: ${friendly_name}
   on_boot:
-    - priority: -100
+    - priority: 500
       then:
         - lambda: |-
-            // M5PM1 I2C init for backlight (L3B power via PYG2)
-            // M5PM1 at 0x6E on bsp_i2c
-            uint8_t buf[1];
+            // M5PM1 @ 0x6E: enable L3B power rail for display backlight
+            uint8_t cmd[2], buf[1];
+            // Probe M5PM1
             auto err = id(bsp_i2c)->read(0x6E, buf, 1);
             if (err == esphome::i2c::ERROR_OK) {
               ESP_LOGI("m5pm1", "M5PM1 ID=0x%02X found at 0x6E", buf[0]);
             } else {
-              ESP_LOGW("m5pm1", "M5PM1 not responding on first try, retrying...");
-              delay(10);
-              err = id(bsp_i2c)->read(0x6E, buf, 1);
-              if (err == esphome::i2c::ERROR_OK) {
-                ESP_LOGI("m5pm1", "M5PM1 ID=0x%02X on retry", buf[0]);
-              } else {
-                ESP_LOGE("m5pm1", "M5PM1 I2C FAILED after retry");
-              }
+              ESP_LOGW("m5pm1", "M5PM1 not responding");
             }
-    - priority: 200
-      then:
-        - delay: 200ms
-        - lambda: |-
-            // Phase 2: Configure M5PM1 GPIO2 (PYG2) for LCD backlight
-            uint8_t cmd[2], buf[1];
             // 1. Disable I2C auto-sleep -- reg 0x09
             cmd[0] = 0x09; cmd[1] = 0x00;
             id(bsp_i2c)->write(0x6E, cmd, 2);
+            delay(10);
             // 2. Enable ALL power rails -- reg 0x06
             cmd[0] = 0x06; cmd[1] = 0x1F;
             id(bsp_i2c)->write(0x6E, cmd, 2);
-            // 3. GPIO_FUNC0: all GPIOs as GPIO mode -- reg 0x16
+            delay(10);
+            // 3. GPIO_FUNC0: GPIO mode -- reg 0x16
             cmd[0] = 0x16; cmd[1] = 0x00;
             id(bsp_i2c)->write(0x6E, cmd, 2);
+            delay(10);
             // 4. GPIO_MODE: GPIO2=output -- reg 0x10
             cmd[0] = 0x10; cmd[1] = 0x04;
             id(bsp_i2c)->write(0x6E, cmd, 2);
+            delay(10);
             // 5. GPIO_DRV: push-pull -- reg 0x13
             cmd[0] = 0x13; cmd[1] = 0x00;
             id(bsp_i2c)->write(0x6E, cmd, 2);
-            // 6. GPIO_OUT: PYG2 LOW (enable L3B) -- reg 0x11
-            cmd[0] = 0x11; cmd[1] = 0x00;
+            delay(10);
+            // 6. PYG2 HIGH -> L3B ON (reg 0x11 bit2 = 1)
+            cmd[0] = 0x11; cmd[1] = 0x04;
             id(bsp_i2c)->write(0x6E, cmd, 2);
-            delay(5);
-            // Readback verify: reg 0x11
-            cmd[0] = 0x11;
-            id(bsp_i2c)->write(0x6E, cmd, 1);
-            id(bsp_i2c)->read(0x6E, buf, 1);
-            ESP_LOGI("m5pm1", "M5PM1 GPIO_OUT=0x%02X (expect 0x00)", buf[0]);
-            // Readback verify: reg 0x06
-            cmd[0] = 0x06;
-            id(bsp_i2c)->write(0x6E, cmd, 1);
-            id(bsp_i2c)->read(0x6E, buf, 1);
-            ESP_LOGI("m5pm1", "M5PM1 PWR_CFG=0x%02X (expect 0x1F)", buf[0]);
-        - delay: 100ms
-        - light.turn_on: sticks3_backlight
+            ESP_LOGI("m5pm1", "M5PM1 PYG2 HIGH: L3B ON");
+        - delay: 50ms
+        - lambda: |-
+            // Direct GPIO38 HIGH (backlight ON)
+            gpio_set_direction(GPIO_NUM_38, GPIO_MODE_OUTPUT);
+            gpio_set_level(GPIO_NUM_38, 1);
+            ESP_LOGI("backlight", "GPIO38 HIGH: backlight ON");
         - delay: 200ms
         - component.update: sticks3_display
 
