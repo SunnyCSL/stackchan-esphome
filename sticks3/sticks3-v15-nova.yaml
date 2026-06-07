@@ -6,6 +6,29 @@ esphome:
   name: ${name}
   friendly_name: ${friendly_name}
   on_boot:
+    - priority: 500
+      then:
+        - lambda: |-
+            // M5PM1 L3B power rail enable (required for display)
+            uint8_t cmd[2];
+            cmd[0] = 0x09; cmd[1] = 0x00;
+            id(bsp_i2c).write(0x6E, cmd, 2);
+            delay(50);
+            uint8_t reg = 0x16;
+            id(bsp_i2c).write(0x6E, &reg, 1);
+            uint8_t func0;
+            if (id(bsp_i2c).read(0x6E, &func0, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
+              func0 &= ~0x30;
+              cmd[0] = 0x16; cmd[1] = func0;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+            }
+            delay(10);
+            cmd[0] = 0x10; cmd[1] = 0x04;
+            id(bsp_i2c).write(0x6E, cmd, 2);
+            delay(10);
+            cmd[0] = 0x11; cmd[1] = 0x04;
+            id(bsp_i2c).write(0x6E, cmd, 2);
+            delay(100);
     - priority: 200
       then:
         - delay: 500ms
@@ -115,12 +138,16 @@ micro_wake_word:
 # ── Display (ST7789P3, 135x240) ──
 display:
   - platform: st7789v
-    model: TTGO TDisplay 135x240
+    model: Custom
+    width: 135
+    height: 240
+    offset_width: 52
+    offset_height: 40
     cs_pin: GPIO41
     dc_pin: GPIO45
     reset_pin: GPIO21
     backlight_pin: GPIO38
-    rotation: 0°
+    rotation: 90°
     update_interval: 1s
     id: sticks3_display
     pages:

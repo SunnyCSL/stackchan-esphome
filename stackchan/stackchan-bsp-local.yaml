@@ -412,124 +412,85 @@ display:
     show_test_card: false
     update_interval: 100ms
     lambda: |-
-      // ── Face Drawing for M5Stack CoreS3 (320×240) ──
+      // ── Robot Face for M5Stack CoreS3 (320×240) — BIG VERSION ──
+      // Full screen = robot head. Square eyes, simple mouth.
       auto w = it.get_width(), h = it.get_height();
       it.fill(Color::BLACK);
 
       bool blink = id(blink_closed);
       int expr = id(face_expression);
-      bool cal_mode = id(calibration_mode);
       float sx = id(servo_x_angle).has_state() ? id(servo_x_angle).state : 0.0f;
       float sy = id(servo_y_angle).has_state() ? id(servo_y_angle).state : 0.0f;
 
-      // Pupil offset follows servo angle (clamped)
-      float px = fminf(fmaxf(sx / 164.0f * 8.0f, -8.0f), 8.0f);
-      float py = fminf(fmaxf(sy / 90.0f * 6.0f - 2.0f, -6.0f), 6.0f);
-      if (blink) { px = 0; py = 0; }
+      // Pupil offset (square) follows servo angle — slightly amplified for big eyes
+      int pox = (int)fminf(fmaxf(sx / 164.0f * 8.0f, -8.0f), 8.0f);
+      int poy = (int)fminf(fmaxf(sy / 90.0f * 6.0f - 2.0f, -6.0f), 6.0f);
+      if (blink) { pox = 0; poy = 0; }
 
-      // ── Eye positions ──
-      int eye_lx = 120, eye_rx = 200, eye_y = 85;
-      int eye_r = 18, iris_r = 8, pupil_r = 4;
-      Color white = Color::WHITE;
-      Color black = Color::BLACK;
-      Color skin  = Color(255, 235, 200);
+      // ── Eye dimensions (BIG) ──
+      int ew = 110, eh = 65;           // eye width, height (~70% screen width total)
+      int gap = 30;                    // gap between eyes
+      int eye_y = 58;                  // top of eyes — roughly 1/4 from top
+      int lx = (w - ew * 2 - gap) / 2; // left eye X (32)
+      int rx = lx + ew + gap;           // right eye X (172)
 
-      // ── Skin (face oval approximated with circles) ──
-      it.filled_circle(160, 110, 90, skin);
-      it.filled_circle(125, 110, 75, skin);
-      it.filled_circle(195, 110, 75, skin);
+      Color eye_on = Color(80, 200, 255);   // cyan LED
+      Color eye_dim = Color(40, 100, 140);  // dimmer cyan
+
+      // ── Eye sockets (dark recessed area) ──
+      it.filled_rectangle(lx - 6, eye_y - 8, ew + 12, eh + 16, Color(10, 15, 25));
+      it.filled_rectangle(rx - 6, eye_y - 8, ew + 12, eh + 16, Color(10, 15, 25));
 
       // ── Left eye ──
       if (blink) {
-        it.filled_rectangle(100, eye_y - 2, 40, 4, white);
+        it.filled_rectangle(lx, eye_y + eh / 2 - 2, ew, 5, Color(40, 50, 60));
       } else {
-        it.filled_circle(eye_lx, eye_y, eye_r, white);
-        it.filled_circle(eye_lx, eye_y, eye_r - 2, white);
-        it.filled_circle(eye_lx + (int)px, eye_y + (int)py, iris_r, Color(60, 40, 20));
-        it.filled_circle(eye_lx + (int)px, eye_y + (int)py, pupil_r, black);
-        it.filled_circle(eye_lx + (int)(px * 0.4f), eye_y - 3 + (int)(py * 0.4f), 2, white);
+        it.filled_rectangle(lx, eye_y, ew, eh, eye_on);
+        // Inner glow
+        it.filled_rectangle(lx + 8, eye_y + 8, ew - 16, eh - 16, Color(160, 230, 255));
+        // Pupil (dark square that tracks servo)
+        it.filled_rectangle(lx + ew / 2 - 7 + pox, eye_y + eh / 2 - 7 + poy, 14, 14, Color(10, 20, 30));
       }
 
       // ── Right eye ──
       if (blink) {
-        it.filled_rectangle(180, eye_y - 2, 40, 4, white);
+        it.filled_rectangle(rx, eye_y + eh / 2 - 2, ew, 5, Color(40, 50, 60));
       } else {
-        it.filled_circle(eye_rx, eye_y, eye_r, white);
-        it.filled_circle(eye_rx, eye_y, eye_r - 2, white);
-        it.filled_circle(eye_rx + (int)px, eye_y + (int)py, iris_r, Color(60, 40, 20));
-        it.filled_circle(eye_rx + (int)px, eye_y + (int)py, pupil_r, black);
-        it.filled_circle(eye_rx + (int)(px * 0.4f), eye_y - 3 + (int)(py * 0.4f), 2, white);
+        it.filled_rectangle(rx, eye_y, ew, eh, eye_on);
+        it.filled_rectangle(rx + 8, eye_y + 8, ew - 16, eh - 16, Color(160, 230, 255));
+        it.filled_rectangle(rx + ew / 2 - 7 + pox, eye_y + eh / 2 - 7 + poy, 14, 14, Color(10, 20, 30));
       }
 
-      // ── Mouth (using circles + lines — no arc() on mipi_spi) ──
-      int mx = 160, my = 150;
-      Color mouth_c = Color(200, 80, 60);
-      if (expr == 0) { // neutral — two dots
-        it.filled_circle(mx - 8, my + 2, 3, mouth_c);
-        it.filled_circle(mx + 8, my + 2, 3, mouth_c);
-      } else if (expr == 1) { // happy — wide smile
-        it.filled_circle(mx - 8, my + 2, 4, mouth_c);
-        it.filled_circle(mx + 8, my + 2, 4, mouth_c);
-        it.line(mx - 14, my + 5, mx + 14, my + 5, mouth_c);
-        it.line(mx - 14, my + 4, mx + 14, my + 4, mouth_c);
-        it.line(mx - 14, my + 6, mx + 14, my + 6, mouth_c);
-      } else if (expr == 2) { // sad — downturned
-        it.filled_circle(mx - 6, my + 6, 4, mouth_c);
-        it.filled_circle(mx + 6, my + 6, 4, mouth_c);
-        it.line(mx - 12, my + 6, mx + 12, my + 6, mouth_c);
-        it.line(mx - 12, my + 7, mx + 12, my + 7, mouth_c);
-      } else if (expr == 3) { // angry — thick frown + brows
-        it.line(mx - 12, my + 6, mx + 12, my + 6, mouth_c);
-        it.line(mx - 12, my + 5, mx + 12, my + 5, mouth_c);
-        it.line(mx - 12, my + 7, mx + 12, my + 7, mouth_c);
-        it.line(mx - 12, my + 8, mx + 12, my + 8, mouth_c);
-        it.line(mx - 12, my + 4, mx + 12, my + 4, mouth_c);
-        it.line(95, 55, 120, 60, Color(60, 40, 20));
-        it.line(200, 55, 175, 60, Color(60, 40, 20));
-      } else if (expr == 4) { // surprised — open circle
-        it.filled_circle(mx, my + 8, 10, Color(180, 60, 40));
-        it.filled_circle(mx, my + 8, 6, Color(240, 100, 80));
-      } else if (expr == 5) { // thinking — one dot + line
-        it.filled_circle(mx - 4, my + 4, 3, mouth_c);
-        it.line(mx + 2, my + 4, mx + 14, my + 2, mouth_c);
-      } else if (expr == 6) { // sleeping
-        it.filled_circle(mx - 4, my + 2, 3, mouth_c);
-        it.filled_circle(mx + 4, my + 2, 3, mouth_c);
-        it.printf(mx + 16, my - 10, id(font_sm), Color(150, 180, 255), TextAlign::TOP_LEFT, "zZ");
-      } else if (expr == 7) { // speaking
+      // ── Mouth (BIG) ──
+      int mx = w / 2, my = 165;
+      Color mouth_c = Color(200, 100, 80);
+      if (expr == 0) { // neutral — flat line
+        it.filled_rectangle(mx - 30, my + 2, 60, 6, Color(100, 120, 140));
+      } else if (expr == 1) { // happy — up-arrow shape
+        it.filled_rectangle(mx - 34, my + 6, 68, 6, mouth_c);
+        it.filled_rectangle(mx - 22, my - 2, 44, 8, mouth_c);
+        it.filled_rectangle(mx - 12, my - 10, 24, 8, mouth_c);
+      } else if (expr == 2) { // sad — down-arrow shape
+        it.filled_rectangle(mx - 34, my - 2, 68, 6, Color(120, 80, 70));
+        it.filled_rectangle(mx - 22, my + 6, 44, 8, Color(120, 80, 70));
+        it.filled_rectangle(mx - 12, my + 14, 24, 8, Color(120, 80, 70));
+      } else if (expr == 3) { // angry — tight line + angry brows
+        it.filled_rectangle(mx - 30, my + 2, 60, 7, Color(220, 60, 40));
+        it.filled_rectangle(lx + 4, eye_y - 18, ew - 8, 5, Color(60, 40, 20));
+        it.filled_rectangle(rx + 4, eye_y - 18, ew - 8, 5, Color(60, 40, 20));
+      } else if (expr == 4) { // surprised — square O
+        it.filled_rectangle(mx - 18, my - 6, 36, 28, Color(180, 60, 40));
+        it.filled_rectangle(mx - 12, my + 2, 24, 12, Color(240, 100, 80));
+      } else if (expr == 5) { // thinking — one big dot
+        it.filled_circle(mx - 6, my + 8, 6, Color(180, 160, 140));
+      } else if (expr == 6) { // sleeping — horizontal lines
+        it.filled_rectangle(lx + 8, eye_y + eh / 2 - 2, ew - 16, 5, Color(40, 50, 60));
+        it.filled_rectangle(rx + 8, eye_y + eh / 2 - 2, ew - 16, 5, Color(40, 50, 60));
+      } else if (expr == 7) { // speaking — pulsing rectangle
         int mo = id(mouth_open);
-        if (mo > 50) {
-          it.filled_circle(mx, my + 6, 12, Color(240, 120, 100));
-          it.filled_circle(mx, my + 6, 8, Color(200, 70, 50));
-        } else if (mo > 20) {
-          it.filled_circle(mx - 8, my + 4, 4, mouth_c);
-          it.filled_circle(mx + 8, my + 4, 4, mouth_c);
-          it.line(mx - 12, my + 4, mx + 12, my + 4, mouth_c);
-        } else {
-          it.filled_circle(mx - 6, my + 2, 3, mouth_c);
-          it.filled_circle(mx + 6, my + 2, 3, mouth_c);
-        }
-      }
-
-      // ── Calibration overlay ──
-      if (cal_mode) {
-        it.filled_rectangle(40, 90, 240, 50, Color::BLACK);
-        it.printf(60, 100, id(font_sm), Color(255, 200, 0), TextAlign::TOP_LEFT, "Tap screen to calibrate");
-        it.printf(60, 122, id(font_sm), Color(200, 200, 200), TextAlign::TOP_LEFT, "Hold head at neutral pos");
-      }
-
-      // ── Bottom info bar ──
-      it.filled_rectangle(0, h - 30, w, 30, Color(10, 10, 30));
-      if (cal_mode) {
-        it.printf(0, h - 24, id(font_sm), Color(255, 200, 0), TextAlign::TOP_LEFT, "CALIBRATE %s%s",
-          id(x_servo_zero_step) > 0 ? "O" : "X",
-          id(y_servo_zero_step) > 0 ? "O" : "X");
-      } else {
-        auto time = id(esptime).now();
-        if (time.is_valid()) {
-          it.strftime(0, h - 24, id(font_sm), Color(100, 200, 255), TextAlign::TOP_LEFT, "%H:%M", time);
-        }
-        it.printf(w - 60, h - 24, id(font_sm), Color(100, 255, 100), TextAlign::TOP_LEFT, "X:%.0f Y:%.0f", sx, sy);
+        int mh = mo > 50 ? 28 : (mo > 20 ? 18 : 8);
+        it.filled_rectangle(mx - 22, my + 8 - mh / 2, 44, mh, Color(240, 120, 100));
+        it.filled_rectangle(mx - 14, my + 8 - mh / 2 + 3, 28, mh - 6, Color(200, 70, 50));
       }
 
 font:
