@@ -285,6 +285,7 @@ time:
     # is much more accurate than the internal clock
     update_interval: never
   - platform: homeassistant
+    id: esptime
     # instead try to synchronize via network repeatedly ...
     on_time_sync:
       then:
@@ -397,8 +398,22 @@ display:
     update_interval: 1s
     lambda: |-
       it.fill(Color::BLACK);
-      it.printf(0, 10, id(font_md), Color(100, 200, 255), TextAlign::TOP_LEFT, "StackChan");
-      it.printf(0, 40, id(font_sm), Color::WHITE, TextAlign::TOP_LEFT, "Online");
+      auto time = id(esptime).now();
+      if (time.is_valid()) {
+        it.strftime(0, 10, id(font_md), Color(100, 200, 255), TextAlign::TOP_LEFT, "%H:%M", time);
+      } else {
+        it.printf(0, 10, id(font_md), Color(100, 200, 255), TextAlign::TOP_LEFT, "StackChan");
+      }
+      it.printf(0, 50, id(font_sm), Color::WHITE, TextAlign::TOP_LEFT, "Online");
+      it.printf(0, 75, id(font_sm), Color(150, 150, 150), TextAlign::TOP_LEFT, "192.168.1.180");
+      if (id(servo_x_angle).has_state()) {
+        float sx = id(servo_x_angle).state;
+        it.printf(180, 50, id(font_sm), Color(100, 255, 100), TextAlign::TOP_LEFT, "X:%.0f", sx);
+      }
+      if (id(servo_y_angle).has_state()) {
+        float sy = id(servo_y_angle).state;
+        it.printf(180, 75, id(font_sm), Color(100, 255, 100), TextAlign::TOP_LEFT, "Y:%.0f", sy);
+      }
 
 font:
   - file: "gfonts://Roboto"
