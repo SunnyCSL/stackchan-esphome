@@ -380,6 +380,21 @@ touchscreen:
       - lambda: |-
           ESP_LOGD("cal", "x=%d, y=%d, x_raw=%d, y_raw=%0d",
                           touch.x, touch.y, touch.x_raw,touch.y_raw);
+          if (id(calibration_mode)) {
+            // Tap to calibrate current servo position as zero
+            float x_zero = id(servo_x_position).state;
+            float y_zero = id(servo_y_position).state;
+            float x_offset = x_zero / 2.844f;
+            float y_offset = y_zero / 2.844f;
+            id(servo_x_angle)->set_angle_offset(static_cast<int>(x_offset));
+            id(servo_y_angle)->set_angle_offset(static_cast<int>(y_offset));
+            id(use_calib_value) = true;
+            id(x_servo_zero_step) = static_cast<int>(x_zero);
+            id(y_servo_zero_step) = static_cast<int>(y_zero);
+            id(calibration_mode) = false;
+            ESP_LOGD("cal", "Calibration done: X=%d, Y=%d",
+                     id(x_servo_zero_step), id(y_servo_zero_step));
+          }
 
 display:
   - platform: mipi_spi
@@ -395,35 +410,122 @@ display:
     invert_colors: true
     id: m5cores3_lcd
     show_test_card: false
-    update_interval: 1s
+    update_interval: 100ms
     lambda: |-
+      // ── Face Drawing for M5Stack CoreS3 (320×240) ──
+      auto w = it.get_width(), h = it.get_height();
       it.fill(Color::BLACK);
-      auto time = id(esptime).now();
-      if (time.is_valid()) {
-        it.strftime(0, 10, id(font_md), Color(100, 200, 255), TextAlign::TOP_LEFT, "%H:%M", time);
+
+      bool blink = id(blink_closed);
+      int expr = id(face_expression);
+      bool cal_mode = id(calibration_mode);
+      float sx = id(servo_x_angle).has_state() ? id(servo_x_angle).state : 0.0f;
+      float sy = id(servo_y_angle).has_state() ? id(servo_y_angle).state : 0.0f;
+
+      // Pupil offset follows servo angle (clamped)
+      float px = fminf(fmaxf(sx / 164.0f * 8.0f, -8.0f), 8.0f);
+      float py = fminf(fmaxf(sy / 90.0f * 6.0f - 2.0f, -6.0f), 6.0f);
+      if (blink) { px = 0; py = 0; }
+
+      // ── Eye positions ──
+      int eye_lx = 120, eye_rx = 200, eye_y = 85;
+      int eye_r = 18, iris_r = 8, pupil_r = 4;
+      Color white = Color::WHITE;
+      Color black = Color::BLACK;
+      Color skin  = Color(255, 235, 200);
+
+      // ── Skin (face oval) ──
+      it.filled_ellipse(160, 110, 140, 160, skin);
+
+      // ── Left eye ──
+      if (blink) {
+        it.filled_rectangle(100, eye_y - 2, 40, 4, white);
       } else {
-        it.printf(0, 10, id(font_md), Color(100, 200, 255), TextAlign::TOP_LEFT, "StackChan");
+        it.filled_circle(eye_lx, eye_y, eye_r, white);
+        it.filled_circle(eye_lx, eye_y, eye_r - 2, white);
+        it.filled_circle(eye_lx + (int)px, eye_y + (int)py, iris_r, Color(60, 40, 20));
+        it.filled_circle(eye_lx + (int)px, eye_y + (int)py, pupil_r, black);
+        it.filled_circle(eye_lx + (int)(px * 0.4f), eye_y - 3 + (int)(py * 0.4f), 2, white);
       }
-      it.printf(0, 50, id(font_sm), Color::WHITE, TextAlign::TOP_LEFT, "Online");
-      it.printf(0, 75, id(font_sm), Color(150, 150, 150), TextAlign::TOP_LEFT, "192.168.1.180");
-      if (id(servo_x_angle).has_state()) {
-        float sx = id(servo_x_angle).state;
-        it.printf(180, 50, id(font_sm), Color(100, 255, 100), TextAlign::TOP_LEFT, "X:%.0f", sx);
+
+      // ── Right eye ──
+      if (blink) {
+        it.filled_rectangle(180, eye_y - 2, 40, 4, white);
+      } else {
+        it.filled_circle(eye_rx, eye_y, eye_r, white);
+        it.filled_circle(eye_rx, eye_y, eye_r - 2, white);
+        it.filled_circle(eye_rx + (int)px, eye_y + (int)py, iris_r, Color(60, 40, 20));
+        it.filled_circle(eye_rx + (int)px, eye_y + (int)py, pupil_r, black);
+        it.filled_circle(eye_rx + (int)(px * 0.4f), eye_y - 3 + (int)(py * 0.4f), 2, white);
       }
-      if (id(servo_y_angle).has_state()) {
-        float sy = id(servo_y_angle).state;
-        it.printf(180, 75, id(font_sm), Color(100, 255, 100), TextAlign::TOP_LEFT, "Y:%.0f", sy);
+
+      // ── Mouth ──
+      int mx = 160, my = 150;
+      Color mouth_c = Color(200, 80, 60);
+      if (expr == 0) { // neutral
+        it.arc(mx, my, 18, 18, 0, 180, mouth_c, 3);
+      } else if (expr == 1) { // happy
+        it.filled_circle(mx - 8, my + 1, 4, mouth_c);
+        it.filled_circle(mx + 8, my + 1, 4, mouth_c);
+        it.arc(mx, my + 6, 20, 16, 0, 180, mouth_c, 4);
+      } else if (expr == 2) { // sad
+        it.arc(mx, my + 8, 18, 18, 180, 360, mouth_c, 3);
+      } else if (expr == 3) { // angry
+        it.arc(mx, my + 8, 14, 14, 180, 360, mouth_c, 5);
+        it.line(95, 55, 120, 60, Color(60, 40, 20));
+        it.line(200, 55, 175, 60, Color(60, 40, 20));
+      } else if (expr == 4) { // surprised
+        it.filled_circle(mx, my + 8, 10, Color(180, 60, 40));
+        it.filled_circle(mx, my + 8, 6, Color(240, 100, 80));
+      } else if (expr == 5) { // thinking
+        it.filled_circle(mx - 6, my + 4, 3, mouth_c);
+        it.arc(mx + 12, my + 4, 12, 12, 300, 420, mouth_c, 3);
+      } else if (expr == 6) { // sleeping — Zzz
+        it.filled_circle(mx - 4, my + 2, 3, mouth_c);
+        it.filled_circle(mx + 4, my + 2, 3, mouth_c);
+        it.printf(mx + 16, my - 10, id(font_sm), Color(150, 180, 255), TextAlign::TOP_LEFT, "zZ");
+      } else if (expr == 7) { // speaking — animated
+        int mo = id(mouth_open);
+        if (mo > 50) {
+          it.filled_ellipse(mx, my + 6, 24, 16, Color(240, 120, 100));
+          it.filled_ellipse(mx, my + 6, 16, 8, Color(200, 70, 50));
+        } else if (mo > 20) {
+          it.arc(mx, my + 4, 18, 16, 0, 180, mouth_c, 4);
+        } else {
+          it.arc(mx, my + 2, 14, 10, 0, 170, mouth_c, 3);
+        }
+      }
+
+      // ── Calibration overlay ──
+      if (cal_mode) {
+        it.filled_rectangle(40, 90, 240, 50, Color(0, 0, 0, 180));
+        id(font_sm).print(it, 60, 100, Color(255, 200, 0), TextAlign::TOP_LEFT, "Tap screen to calibrate");
+        id(font_sm).print(it, 60, 122, Color(200, 200, 200), TextAlign::TOP_LEFT, "Hold head at neutral pos");
+      }
+
+      // ── Bottom info bar ──
+      it.filled_rectangle(0, h - 30, w, 30, Color(10, 10, 30));
+      if (cal_mode) {
+        it.printf(0, h - 24, id(font_sm), Color(255, 200, 0), TextAlign::TOP_LEFT, "CALIBRATE %s%s",
+          id(x_servo_zero_step) > 0 ? "O" : "X",
+          id(y_servo_zero_step) > 0 ? "O" : "X");
+      } else {
+        auto time = id(esptime).now();
+        if (time.is_valid()) {
+          it.strftime(0, h - 24, id(font_sm), Color(100, 200, 255), TextAlign::TOP_LEFT, "%H:%M", time);
+        }
+        it.printf(w - 60, h - 24, id(font_sm), Color(100, 255, 100), TextAlign::TOP_LEFT, "X:%.0f Y:%.0f", sx, sy);
       }
 
 font:
   - file: "gfonts://Roboto"
     id: font_md
     size: 24
-    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz 0123456789.:"
+    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz 0123456789.:-"
   - file: "gfonts://Roboto"
     id: font_sm
     size: 16
-    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz 0123456789.:!?"
+    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz 0123456789.:-!?"
 
 light:
   - platform: monochromatic
@@ -580,6 +682,17 @@ button:
           global_preferences->sync(); // sync at once
           ESP_LOGD("ftservo", "Done clear calibration");
 
+  - platform: template
+    name: "Face Calibration Mode"
+    on_press:
+      - lambda: |-
+          id(calibration_mode) = true;
+          id(m5cores3_lcd).update();
+      - delay: 15s
+      - lambda: |-
+          id(calibration_mode) = false;
+          id(m5cores3_lcd).update();
+
 text_sensor:
   - platform: si12t
     name: "Touch Sensor 1"
@@ -637,5 +750,76 @@ globals:
   - id: y_servo_zero_step
     type: int
     restore_value: yes
-    initial_value: ${servo_y_angle_offset}
-    update_interval: "100ms"    
+    initial_value: '${servo_y_angle_offset}'
+    update_interval: "100ms"
+
+  - id: blink_closed
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
+  - id: face_expression
+    type: int
+    restore_value: no
+    initial_value: "0"
+
+  - id: calibration_mode
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
+  - id: mouth_open
+    type: int
+    restore_value: no
+    initial_value: "0"
+select:
+  - platform: template
+    name: "Face Expression"
+    id: face_expr_select
+    icon: "mdi:emoticon-happy"
+    optimistic: true
+    options:
+      - "Neutral"
+      - "Happy"
+      - "Sad"
+      - "Angry"
+      - "Surprised"
+      - "Thinking"
+      - "Sleeping"
+      - "Speaking"
+    initial_option: "Neutral"
+    set_action:
+      then:
+        - lambda: |-
+            if (x == "Neutral")    { id(face_expression) = 0; }
+            else if (x == "Happy")  { id(face_expression) = 1; }
+            else if (x == "Sad")    { id(face_expression) = 2; }
+            else if (x == "Angry")  { id(face_expression) = 3; }
+            else if (x == "Surprised") { id(face_expression) = 4; }
+            else if (x == "Thinking") { id(face_expression) = 5; }
+            else if (x == "Sleeping") { id(face_expression) = 6; }
+            else if (x == "Speaking") { id(face_expression) = 7; }
+
+interval:
+  - id: blink_interval
+    interval: 4s
+    then:
+      - lambda: |-
+          if (id(face_expression) == 6) return;
+          id(blink_closed) = true;
+          id(m5cores3_lcd).update();
+      - delay: 120ms
+      - lambda: |-
+          id(blink_closed) = false;
+          id(m5cores3_lcd).update();
+
+  - id: speaking_anim_interval
+    interval: 120ms
+    then:
+      - lambda: |-
+          if (id(face_expression) == 7) {
+            static int frame = 0;
+            frame = (frame + 1) % 100;
+            id(mouth_open) = frame;
+            id(m5cores3_lcd).update();
+          }
