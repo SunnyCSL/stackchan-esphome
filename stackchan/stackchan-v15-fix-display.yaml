@@ -19,3 +19,56 @@ api:
 
 ota:
   - platform: esphome
+
+# ── Voice Assistant ──
+voice_assistant:
+  id: va
+  microphone: i2s_mic
+  media_player: va_media_player
+  micro_wake_word: wake_word
+  noise_suppression_level: 2
+  volume_multiplier: 1.5
+  use_wake_word: true
+  conversation_timeout: 600s
+  on_listening:
+    then:
+      - lambda: |-
+          id(face_expression) = 4;  // surprised — listening
+          id(m5cores3_lcd).update();
+  on_stt_end:
+    then:
+      - lambda: |-
+          id(face_expression) = 1;  // happy — understood
+          id(m5cores3_lcd).update();
+  on_tts_start:
+    then:
+      - lambda: |-
+          id(face_expression) = 7;  // speaking — mouth animates
+          id(m5cores3_lcd).update();
+  on_tts_end:
+    then:
+      - lambda: |-
+          id(face_expression) = 0;  // neutral — continuous mode auto-listens next
+          id(m5cores3_lcd).update();
+  on_idle:
+    then:
+      - lambda: |-
+          id(face_expression) = 0;  // neutral — idle
+          id(m5cores3_lcd).update();
+
+# ── Wake Word — triggers continuous conversation ──
+micro_wake_word:
+  id: wake_word
+  models:
+    - hey_jarvis
+  on_wake_word_detected:
+    then:
+      - lambda: |-
+          id(face_expression) = 4;  // surprised
+          id(m5cores3_lcd).update();
+      - voice_assistant.start_continuous:
+      - homeassistant.event:
+          event: esphome.wake_word_detected
+          data:
+            device: stackchan
+            confidence: "0.85"

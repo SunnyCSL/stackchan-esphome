@@ -422,7 +422,7 @@ display:
       float sx = id(servo_x_angle).has_state() ? id(servo_x_angle).state : 0.0f;
       float sy = id(servo_y_angle).has_state() ? id(servo_y_angle).state : 0.0f;
 
-      // Pupil offset (square) follows servo angle — slightly amplified for big eyes
+      // Pupil offset follows servo angle
       int pox = (int)fminf(fmaxf(sx / 164.0f * 8.0f, -8.0f), 8.0f);
       int poy = (int)fminf(fmaxf(sy / 90.0f * 6.0f - 2.0f, -6.0f), 6.0f);
       if (blink) { pox = 0; poy = 0; }
@@ -430,67 +430,65 @@ display:
       // ── Eye dimensions (BIG) ──
       int ew = 110, eh = 65;           // eye width, height (~70% screen width total)
       int gap = 30;                    // gap between eyes
-      int eye_y = 58;                  // top of eyes — roughly 1/4 from top
-      int lx = (w - ew * 2 - gap) / 2; // left eye X (32)
-      int rx = lx + ew + gap;           // right eye X (172)
+      int eye_y = 48;                  // top of eyes
+      int lx = (w - ew * 2 - gap) / 2; // left eye X
+      int rx = lx + ew + gap;           // right eye X
 
-      Color eye_on = Color(80, 200, 255);   // cyan LED
-      Color eye_dim = Color(40, 100, 140);  // dimmer cyan
+      Color eye_bg = Color(15, 25, 10);     // dark green socket
+      Color eye_on = Color(80, 220, 80);    // green LED
+      Color eye_dim = Color(30, 100, 30);   // dimmer green
 
       // ── Eye sockets (dark recessed area) ──
-      it.filled_rectangle(lx - 6, eye_y - 8, ew + 12, eh + 16, Color(10, 15, 25));
-      it.filled_rectangle(rx - 6, eye_y - 8, ew + 12, eh + 16, Color(10, 15, 25));
+      it.filled_rectangle(lx - 6, eye_y - 8, ew + 12, eh + 16, eye_bg);
+      it.filled_rectangle(rx - 6, eye_y - 8, ew + 12, eh + 16, eye_bg);
 
       // ── Left eye ──
       if (blink) {
-        it.filled_rectangle(lx, eye_y + eh / 2 - 2, ew, 5, Color(40, 50, 60));
+        it.filled_rectangle(lx, eye_y + eh / 2 - 2, ew, 4, Color(30, 60, 30));
       } else {
         it.filled_rectangle(lx, eye_y, ew, eh, eye_on);
-        // Inner glow
-        it.filled_rectangle(lx + 8, eye_y + 8, ew - 16, eh - 16, Color(160, 230, 255));
-        // Pupil (dark square that tracks servo)
-        it.filled_rectangle(lx + ew / 2 - 7 + pox, eye_y + eh / 2 - 7 + poy, 14, 14, Color(10, 20, 30));
+        // Pupil (darker green square)
+        it.filled_rectangle(lx + ew / 2 - 7 + pox, eye_y + eh / 2 - 7 + poy, 14, 14, Color(10, 60, 10));
       }
 
       // ── Right eye ──
       if (blink) {
-        it.filled_rectangle(rx, eye_y + eh / 2 - 2, ew, 5, Color(40, 50, 60));
+        it.filled_rectangle(rx, eye_y + eh / 2 - 2, ew, 4, Color(30, 60, 30));
       } else {
         it.filled_rectangle(rx, eye_y, ew, eh, eye_on);
-        it.filled_rectangle(rx + 8, eye_y + 8, ew - 16, eh - 16, Color(160, 230, 255));
-        it.filled_rectangle(rx + ew / 2 - 7 + pox, eye_y + eh / 2 - 7 + poy, 14, 14, Color(10, 20, 30));
+        it.filled_rectangle(rx + ew / 2 - 7 + pox, eye_y + eh / 2 - 7 + poy, 14, 14, Color(10, 60, 10));
       }
 
       // ── Mouth (BIG) ──
-      int mx = w / 2, my = 165;
-      Color mouth_c = Color(200, 100, 80);
+      int mx = w / 2, my = 182;
+      Color mouth_c = Color(120, 220, 100);
       if (expr == 0) { // neutral — flat line
-        it.filled_rectangle(mx - 30, my + 2, 60, 6, Color(100, 120, 140));
+        it.filled_rectangle(mx - 30, my + 2, 60, 6, Color(80, 140, 70));
       } else if (expr == 1) { // happy — up-arrow shape
         it.filled_rectangle(mx - 34, my + 6, 68, 6, mouth_c);
         it.filled_rectangle(mx - 22, my - 2, 44, 8, mouth_c);
         it.filled_rectangle(mx - 12, my - 10, 24, 8, mouth_c);
       } else if (expr == 2) { // sad — down-arrow shape
-        it.filled_rectangle(mx - 34, my - 2, 68, 6, Color(120, 80, 70));
-        it.filled_rectangle(mx - 22, my + 6, 44, 8, Color(120, 80, 70));
-        it.filled_rectangle(mx - 12, my + 14, 24, 8, Color(120, 80, 70));
+        it.filled_rectangle(mx - 34, my - 2, 68, 6, Color(60, 100, 50));
+        it.filled_rectangle(mx - 22, my + 6, 44, 8, Color(60, 100, 50));
+        it.filled_rectangle(mx - 12, my + 14, 24, 8, Color(60, 100, 50));
       } else if (expr == 3) { // angry — tight line + angry brows
-        it.filled_rectangle(mx - 30, my + 2, 60, 7, Color(220, 60, 40));
-        it.filled_rectangle(lx + 4, eye_y - 18, ew - 8, 5, Color(60, 40, 20));
-        it.filled_rectangle(rx + 4, eye_y - 18, ew - 8, 5, Color(60, 40, 20));
+        it.filled_rectangle(mx - 30, my + 2, 60, 7, Color(180, 80, 40));
+        it.filled_rectangle(lx + 4, eye_y - 18, ew - 8, 5, Color(80, 40, 20));
+        it.filled_rectangle(rx + 4, eye_y - 18, ew - 8, 5, Color(80, 40, 20));
       } else if (expr == 4) { // surprised — square O
-        it.filled_rectangle(mx - 18, my - 6, 36, 28, Color(180, 60, 40));
-        it.filled_rectangle(mx - 12, my + 2, 24, 12, Color(240, 100, 80));
+        it.filled_rectangle(mx - 18, my - 6, 36, 28, Color(100, 180, 80));
+        it.filled_rectangle(mx - 12, my + 2, 24, 12, Color(160, 240, 120));
       } else if (expr == 5) { // thinking — one big dot
-        it.filled_circle(mx - 6, my + 8, 6, Color(180, 160, 140));
+        it.filled_circle(mx - 6, my + 8, 6, Color(80, 130, 60));
       } else if (expr == 6) { // sleeping — horizontal lines
-        it.filled_rectangle(lx + 8, eye_y + eh / 2 - 2, ew - 16, 5, Color(40, 50, 60));
-        it.filled_rectangle(rx + 8, eye_y + eh / 2 - 2, ew - 16, 5, Color(40, 50, 60));
+        it.filled_rectangle(lx + 8, eye_y + eh / 2 - 2, ew - 16, 4, Color(30, 60, 30));
+        it.filled_rectangle(rx + 8, eye_y + eh / 2 - 2, ew - 16, 4, Color(30, 60, 30));
       } else if (expr == 7) { // speaking — pulsing rectangle
         int mo = id(mouth_open);
         int mh = mo > 50 ? 28 : (mo > 20 ? 18 : 8);
-        it.filled_rectangle(mx - 22, my + 8 - mh / 2, 44, mh, Color(240, 120, 100));
-        it.filled_rectangle(mx - 14, my + 8 - mh / 2 + 3, 28, mh - 6, Color(200, 70, 50));
+        it.filled_rectangle(mx - 22, my + 8 - mh / 2, 44, mh, Color(100, 200, 80));
+        it.filled_rectangle(mx - 14, my + 8 - mh / 2 + 3, 28, mh - 6, Color(60, 160, 50));
       }
 
 font:

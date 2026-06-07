@@ -6,32 +6,63 @@ esphome:
   name: ${name}
   friendly_name: ${friendly_name}
   on_boot:
-    - priority: 500
+    - priority: -100
       then:
         - lambda: |-
-            // M5PM1 L3B power rail enable (required for display)
-            uint8_t cmd[2];
-            cmd[0] = 0x09; cmd[1] = 0x00;
-            id(bsp_i2c).write(0x6E, cmd, 2);
-            delay(50);
-            uint8_t reg = 0x16;
-            id(bsp_i2c).write(0x6E, &reg, 1);
-            uint8_t func0;
-            if (id(bsp_i2c).read(0x6E, &func0, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
-              func0 &= ~0x30;
-              cmd[0] = 0x16; cmd[1] = func0;
-              id(bsp_i2c).write(0x6E, cmd, 2);
+            // M5PM1 I2C init for backlight (L3B power via PYG2)
+            // M5PM1 at 0x6E on bsp_i2c
+            uint8_t buf[1];
+            auto err = id(bsp_i2c)->read(0x6E, buf, 1);
+            if (err == esphome::i2c::ERROR_OK) {
+              ESP_LOGI("m5pm1", "M5PM1 ID=0x%02X found at 0x6E", buf[0]);
+            } else {
+              ESP_LOGW("m5pm1", "M5PM1 not responding on first try, retrying...");
+              delay(10);
+              err = id(bsp_i2c)->read(0x6E, buf, 1);
+              if (err == esphome::i2c::ERROR_OK) {
+                ESP_LOGI("m5pm1", "M5PM1 ID=0x%02X on retry", buf[0]);
+              } else {
+                ESP_LOGE("m5pm1", "M5PM1 I2C FAILED after retry");
+              }
             }
-            delay(10);
-            cmd[0] = 0x10; cmd[1] = 0x04;
-            id(bsp_i2c).write(0x6E, cmd, 2);
-            delay(10);
-            cmd[0] = 0x11; cmd[1] = 0x04;
-            id(bsp_i2c).write(0x6E, cmd, 2);
-            delay(100);
     - priority: 200
       then:
-        - delay: 500ms
+        - delay: 200ms
+        - lambda: |-
+            // Phase 2: Configure M5PM1 GPIO2 (PYG2) for LCD backlight
+            uint8_t cmd[2], buf[1];
+            // 1. Disable I2C auto-sleep -- reg 0x09
+            cmd[0] = 0x09; cmd[1] = 0x00;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            // 2. Enable ALL power rails -- reg 0x06
+            cmd[0] = 0x06; cmd[1] = 0x1F;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            // 3. GPIO_FUNC0: all GPIOs as GPIO mode -- reg 0x16
+            cmd[0] = 0x16; cmd[1] = 0x00;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            // 4. GPIO_MODE: GPIO2=output -- reg 0x10
+            cmd[0] = 0x10; cmd[1] = 0x04;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            // 5. GPIO_DRV: push-pull -- reg 0x13
+            cmd[0] = 0x13; cmd[1] = 0x00;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            // 6. GPIO_OUT: PYG2 LOW (enable L3B) -- reg 0x11
+            cmd[0] = 0x11; cmd[1] = 0x00;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            delay(5);
+            // Readback verify: reg 0x11
+            cmd[0] = 0x11;
+            id(bsp_i2c)->write(0x6E, cmd, 1);
+            id(bsp_i2c)->read(0x6E, buf, 1);
+            ESP_LOGI("m5pm1", "M5PM1 GPIO_OUT=0x%02X (expect 0x00)", buf[0]);
+            // Readback verify: reg 0x06
+            cmd[0] = 0x06;
+            id(bsp_i2c)->write(0x6E, cmd, 1);
+            id(bsp_i2c)->read(0x6E, buf, 1);
+            ESP_LOGI("m5pm1", "M5PM1 PWR_CFG=0x%02X (expect 0x1F)", buf[0]);
+        - delay: 100ms
+        - light.turn_on: sticks3_backlight
+        - delay: 200ms
         - component.update: sticks3_display
 
 esp32:
@@ -84,7 +115,7 @@ time:
   - platform: homeassistant
     id: esptime
 
-# ── Audio (I2S) ──
+# -- Audio (I2S) --
 i2s_audio:
   i2s_lrclk_pin: GPIO15
   i2s_bclk_pin: GPIO17
@@ -118,9 +149,20 @@ media_player:
       sample_rate: 24000
       num_channels: 1
 
-# ── Voice Assistant ── (removed)
+# -- Outputs --
+output:
+  - platform: gpio
+    pin: GPIO38
+    id: backlight_gpio
 
-# ── Wake Word ──
+light:
+  - platform: binary
+    name: "StickS3 Backlight"
+    id: sticks3_backlight
+    output: backlight_gpio
+    restore_mode: ALWAYS_ON
+
+# -- Wake Word --
 micro_wake_word:
   models:
     - hey_jarvis
@@ -135,19 +177,14 @@ micro_wake_word:
               device: sticks3
               confidence: "0.85"
 
-# ── Display (ST7789P3, 135x240) ──
+# -- Display (ST7789P3, 135x240) --
 display:
   - platform: st7789v
-    model: Custom
-    width: 135
-    height: 240
-    offset_width: 52
-    offset_height: 40
+    model: TTGO TDisplay 135x240
     cs_pin: GPIO41
     dc_pin: GPIO45
     reset_pin: GPIO21
-    backlight_pin: GPIO38
-    rotation: 90°
+    rotation: 0°
     update_interval: 1s
     id: sticks3_display
     pages:
@@ -286,7 +323,6 @@ text:
           id(sticks3_display).update();
 
 interval:
-  # Fast: display update + timer only
   - id: update_interval_display
     interval: 1s
     then:
@@ -298,12 +334,10 @@ interval:
             }
           }
 
-  # Motion detection (track only, no I2C writes)
   - id: motion_interval_1s
     interval: 1s
     then:
       - lambda: |-
-          // Check if MPU6886 sensor has valid state
           if (!id(accel_x).has_state() || !id(accel_y).has_state() || !id(accel_z).has_state()) {
             return;
           }
@@ -326,7 +360,6 @@ interval:
             return;
           }
 
-          // No motion — increment idle counter (tracking only)
           if (id(idle_counter) < 30) {
             id(idle_counter)++;
           }
@@ -387,7 +420,6 @@ binary_sensor:
             device: sticks3
             button: key2
 
-# MPU6886 Accelerometer
 sensor:
   - platform: mpu6886
     id: imu
