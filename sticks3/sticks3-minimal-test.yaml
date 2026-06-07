@@ -12,6 +12,10 @@ esp32:
   framework:
     type: esp-idf
 
+psram:
+  mode: octal
+  speed: 80MHz
+
 wifi:
   ssid: "SC"
   password: "8447Ce8086"
@@ -22,6 +26,8 @@ wifi:
   ap:
 
 api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
   reboot_timeout: 10min
 
 ota:
@@ -29,3 +35,72 @@ ota:
 
 logger:
   level: VERBOSE
+
+i2c:
+  - id: bsp_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: true
+
+spi:
+  clk_pin: GPIO40
+  mosi_pin: GPIO39
+
+time:
+  - platform: homeassistant
+    id: esptime
+
+output:
+  - platform: ledc
+    pin: GPIO38
+    id: backlight_pwm
+    frequency: 1000Hz
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    id: sticks3_backlight
+    restore_mode: ALWAYS_ON
+    default_transition_length: 0s
+
+display:
+  - platform: st7789v
+    model: TTGO TDisplay 135x240
+    cs_pin: GPIO41
+    dc_pin: GPIO45
+    reset_pin: GPIO21
+    update_interval: 1s
+    id: sticks3_display
+    lambda: |-
+      it.fill(Color(5, 5, 15));
+      it.strftime(0, 0, id(font_lg), Color(100, 200, 255), TextAlign::TOP_LEFT, "%H:%M", id(esptime).now());
+      it.printf(0, 60, id(font_md), Color::WHITE, "StickS3 Test");
+
+font:
+  - file: "gfonts://Figtree"
+    id: font_lg
+    size: 32
+    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
+  - file: "gfonts://Figtree"
+    id: font_md
+    size: 20
+    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
+
+sensor:
+  - platform: mpu6886
+    id: imu
+    i2c_id: bsp_i2c
+    address: 0x68
+    accel_x:
+      name: "Accel X"
+      id: accel_x
+      internal: true
+    accel_y:
+      name: "Accel Y"
+      id: accel_y
+      internal: true
+    accel_z:
+      name: "Accel Z"
+      id: accel_z
+      internal: true
+    update_interval: 1s
