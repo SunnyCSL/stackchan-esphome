@@ -8,7 +8,35 @@ esphome:
   on_boot:
     - priority: 200
       then:
-        - delay: 500ms
+        - delay: 100ms
+        - lambda: |-
+            // Enable M5PM1 PYG2 (GPIO2) for LCD backlight (L3B power rail)
+            // M5PM1 is at I2C address 0x6E on the bsp_i2c bus
+            // Protocol: send [register_byte, value_byte]
+            // GPIO_FUNC0 reg=0x16: set GPIO2 to GPIO mode (bits 5:4 = 00)
+            {
+              uint8_t cmd[] = {0x16, 0x00};
+              id(bsp_i2c)->write(0x6E, cmd, 2);
+            }
+            // GPIO_MODE reg=0x10: set GPIO2 as output (bit 2 = 1)
+            {
+              uint8_t cmd[] = {0x10, 0x04};
+              id(bsp_i2c)->write(0x6E, cmd, 2);
+            }
+            // GPIO_DRV reg=0x13: all push-pull
+            {
+              uint8_t cmd[] = {0x13, 0x00};
+              id(bsp_i2c)->write(0x6E, cmd, 2);
+            }
+            // GPIO_OUT reg=0x11: PYG2 LOW (enable L3B backlight)
+            {
+              uint8_t cmd[] = {0x11, 0x00};
+              id(bsp_i2c)->write(0x6E, cmd, 2);
+            }
+            ESP_LOGI("sticks3", "M5PM1 PYG2 configured: L3B power ON");
+        - delay: 200ms
+        - light.turn_on: sticks3_backlight
+        - delay: 200ms
         - component.update: sticks3_display
 
 esp32:
@@ -90,6 +118,11 @@ media_player:
   - platform: speaker
     name: "StickS3 Speaker"
     id: sticks3_speaker
+    announcement_pipeline:
+      speaker: speaker_a
+      format: WAV
+      sample_rate: 24000
+      num_channels: 1
 
 # ── Outputs ──
 output:

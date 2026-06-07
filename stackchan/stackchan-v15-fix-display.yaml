@@ -1,0 +1,21 @@
+substitutions:
+  name: stackchan
+  friendly_name: StackChan
+
+packages:
+  - !include /home/radxa/stackchan-esphome/stackchan/stackchan-bsp-local.yaml
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.180
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
