@@ -434,8 +434,10 @@ display:
       Color black = Color::BLACK;
       Color skin  = Color(255, 235, 200);
 
-      // ── Skin (face oval) ──
-      it.filled_ellipse(160, 110, 140, 160, skin);
+      // ── Skin (face oval approximated with circles) ──
+      it.filled_circle(160, 110, 90, skin);
+      it.filled_circle(125, 110, 75, skin);
+      it.filled_circle(195, 110, 75, skin);
 
       // ── Left eye ──
       if (blink) {
@@ -459,48 +461,61 @@ display:
         it.filled_circle(eye_rx + (int)(px * 0.4f), eye_y - 3 + (int)(py * 0.4f), 2, white);
       }
 
-      // ── Mouth ──
+      // ── Mouth (using circles + lines — no arc() on mipi_spi) ──
       int mx = 160, my = 150;
       Color mouth_c = Color(200, 80, 60);
-      if (expr == 0) { // neutral
-        it.arc(mx, my, 18, 18, 0, 180, mouth_c, 3);
-      } else if (expr == 1) { // happy
-        it.filled_circle(mx - 8, my + 1, 4, mouth_c);
-        it.filled_circle(mx + 8, my + 1, 4, mouth_c);
-        it.arc(mx, my + 6, 20, 16, 0, 180, mouth_c, 4);
-      } else if (expr == 2) { // sad
-        it.arc(mx, my + 8, 18, 18, 180, 360, mouth_c, 3);
-      } else if (expr == 3) { // angry
-        it.arc(mx, my + 8, 14, 14, 180, 360, mouth_c, 5);
+      if (expr == 0) { // neutral — two dots
+        it.filled_circle(mx - 8, my + 2, 3, mouth_c);
+        it.filled_circle(mx + 8, my + 2, 3, mouth_c);
+      } else if (expr == 1) { // happy — wide smile
+        it.filled_circle(mx - 8, my + 2, 4, mouth_c);
+        it.filled_circle(mx + 8, my + 2, 4, mouth_c);
+        it.line(mx - 14, my + 5, mx + 14, my + 5, mouth_c);
+        it.line(mx - 14, my + 4, mx + 14, my + 4, mouth_c);
+        it.line(mx - 14, my + 6, mx + 14, my + 6, mouth_c);
+      } else if (expr == 2) { // sad — downturned
+        it.filled_circle(mx - 6, my + 6, 4, mouth_c);
+        it.filled_circle(mx + 6, my + 6, 4, mouth_c);
+        it.line(mx - 12, my + 6, mx + 12, my + 6, mouth_c);
+        it.line(mx - 12, my + 7, mx + 12, my + 7, mouth_c);
+      } else if (expr == 3) { // angry — thick frown + brows
+        it.line(mx - 12, my + 6, mx + 12, my + 6, mouth_c);
+        it.line(mx - 12, my + 5, mx + 12, my + 5, mouth_c);
+        it.line(mx - 12, my + 7, mx + 12, my + 7, mouth_c);
+        it.line(mx - 12, my + 8, mx + 12, my + 8, mouth_c);
+        it.line(mx - 12, my + 4, mx + 12, my + 4, mouth_c);
         it.line(95, 55, 120, 60, Color(60, 40, 20));
         it.line(200, 55, 175, 60, Color(60, 40, 20));
-      } else if (expr == 4) { // surprised
+      } else if (expr == 4) { // surprised — open circle
         it.filled_circle(mx, my + 8, 10, Color(180, 60, 40));
         it.filled_circle(mx, my + 8, 6, Color(240, 100, 80));
-      } else if (expr == 5) { // thinking
-        it.filled_circle(mx - 6, my + 4, 3, mouth_c);
-        it.arc(mx + 12, my + 4, 12, 12, 300, 420, mouth_c, 3);
-      } else if (expr == 6) { // sleeping — Zzz
+      } else if (expr == 5) { // thinking — one dot + line
+        it.filled_circle(mx - 4, my + 4, 3, mouth_c);
+        it.line(mx + 2, my + 4, mx + 14, my + 2, mouth_c);
+      } else if (expr == 6) { // sleeping
         it.filled_circle(mx - 4, my + 2, 3, mouth_c);
         it.filled_circle(mx + 4, my + 2, 3, mouth_c);
         it.printf(mx + 16, my - 10, id(font_sm), Color(150, 180, 255), TextAlign::TOP_LEFT, "zZ");
-      } else if (expr == 7) { // speaking — animated
+      } else if (expr == 7) { // speaking
         int mo = id(mouth_open);
         if (mo > 50) {
-          it.filled_ellipse(mx, my + 6, 24, 16, Color(240, 120, 100));
-          it.filled_ellipse(mx, my + 6, 16, 8, Color(200, 70, 50));
+          it.filled_circle(mx, my + 6, 12, Color(240, 120, 100));
+          it.filled_circle(mx, my + 6, 8, Color(200, 70, 50));
         } else if (mo > 20) {
-          it.arc(mx, my + 4, 18, 16, 0, 180, mouth_c, 4);
+          it.filled_circle(mx - 8, my + 4, 4, mouth_c);
+          it.filled_circle(mx + 8, my + 4, 4, mouth_c);
+          it.line(mx - 12, my + 4, mx + 12, my + 4, mouth_c);
         } else {
-          it.arc(mx, my + 2, 14, 10, 0, 170, mouth_c, 3);
+          it.filled_circle(mx - 6, my + 2, 3, mouth_c);
+          it.filled_circle(mx + 6, my + 2, 3, mouth_c);
         }
       }
 
       // ── Calibration overlay ──
       if (cal_mode) {
-        it.filled_rectangle(40, 90, 240, 50, Color(0, 0, 0, 180));
-        id(font_sm).print(it, 60, 100, Color(255, 200, 0), TextAlign::TOP_LEFT, "Tap screen to calibrate");
-        id(font_sm).print(it, 60, 122, Color(200, 200, 200), TextAlign::TOP_LEFT, "Hold head at neutral pos");
+        it.filled_rectangle(40, 90, 240, 50, Color::BLACK);
+        it.printf(60, 100, id(font_sm), Color(255, 200, 0), TextAlign::TOP_LEFT, "Tap screen to calibrate");
+        it.printf(60, 122, id(font_sm), Color(200, 200, 200), TextAlign::TOP_LEFT, "Hold head at neutral pos");
       }
 
       // ── Bottom info bar ──
