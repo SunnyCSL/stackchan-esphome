@@ -8,6 +8,7 @@ packages:
 wifi:
   ssid: "SC"
   password: "8447Ce8086"
+  power_save_mode: none
   manual_ip:
     static_ip: 192.168.1.180
     gateway: 192.168.1.1
@@ -60,7 +61,9 @@ voice_assistant:
 micro_wake_word:
   id: wake_word
   models:
-    - hey_jarvis
+    - model: hey_jarvis
+      probability_cutoff: 0.80
+      sliding_window_size: 3
   on_wake_word_detected:
     then:
       - lambda: |-
