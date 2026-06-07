@@ -56,6 +56,12 @@ voice_assistant:
       - lambda: |-
           id(face_expression) = 0;  // neutral — idle
           id(m5cores3_lcd).update();
+  on_error:
+    then:
+      - lambda: |-
+          ESP_LOGE("voice", "VA error: code=%d, msg=%s", code, message.c_str());
+          id(face_expression) = 2;  // sad — error
+          id(m5cores3_lcd).update();
 
 # ── Wake Word — triggers continuous conversation ──
 micro_wake_word:

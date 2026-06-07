@@ -153,15 +153,58 @@ micro_wake_word:
   models:
     - hey_jarvis
   on_wake_word_detected:
-    - then:
-        - lambda: |-
-            id(display_mode) = 1;
-            id(sticks3_display).update();
-        - homeassistant.event:
-            event: esphome.wake_word_detected
-            data:
-              device: sticks3
-              confidence: "0.85"
+    then:
+      - lambda: |-
+          id(display_mode) = 1;
+          id(sticks3_display).update();
+      - voice_assistant.start_continuous:
+      - homeassistant.event:
+          event: esphome.wake_word_detected
+          data:
+            device: sticks3
+            confidence: "0.85"
+
+# -- Voice Assistant --
+voice_assistant:
+  microphone: mic_a
+  media_player: sticks3_speaker
+  noise_suppression_level: 2
+  volume_multiplier: 1.5
+  use_wake_word: true
+  conversation_timeout: 600s
+  on_listening:
+    then:
+      - lambda: |-
+          id(display_mode) = 1;
+          id(voice_listening) = true;
+          id(sticks3_display).update();
+  on_stt_end:
+    then:
+      - lambda: |-
+          id(sticks3_display).update();
+  on_tts_start:
+    then:
+      - lambda: |-
+          id(display_mode) = 2;
+          id(sticks3_display).update();
+  on_tts_end:
+    then:
+      - lambda: |-
+          id(display_mode) = 0;
+          id(sticks3_display).update();
+  on_idle:
+    then:
+      - lambda: |-
+          id(display_mode) = 0;
+          id(voice_listening) = false;
+          id(sticks3_display).update();
+  on_error:
+    then:
+      - lambda: |-
+          ESP_LOGE("voice", "VA error: code=%d, msg=%s", code, message.c_str());
+          id(display_mode) = 0;
+          id(voice_listening) = false;
+          id(sticks3_display).update();
 
 # -- Display (ST7789P3, 135x240) --
 display:
@@ -373,6 +416,7 @@ binary_sensor:
                 id(voice_listening) = true;
                 id(display_mode) = 1;
                 id(sticks3_display).update();
+            - voice_assistant.start_continuous:
       - homeassistant.event:
           event: esphome.button_voice_trigger
           data:
@@ -395,11 +439,13 @@ binary_sensor:
                 id(voice_listening) = false;
                 id(display_mode) = 0;
                 id(sticks3_display).update();
+            - voice_assistant.stop:
           else:
             - lambda: |-
                 id(voice_listening) = true;
                 id(display_mode) = 1;
                 id(sticks3_display).update();
+            - voice_assistant.start_continuous:
       - homeassistant.event:
           event: esphome.button_voice_trigger
           data:
