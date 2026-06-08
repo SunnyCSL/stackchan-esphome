@@ -1,0 +1,371 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    - priority: -100
+      then:
+        - lambda: |-
+            uint8_t buf[1];
+            auto err = id(bsp_i2c)->read(0x6E, buf, 1);
+            if (err == esphome::i2c::ERROR_OK) {
+              ESP_LOGI("m5pm1", "M5PM1 ID=0x%02X found at 0x6E", buf[0]);
+            } else {
+              ESP_LOGW("m5pm1", "M5PM1 not responding on first try, retrying...");
+              delay(10);
+              err = id(bsp_i2c)->read(0x6E, buf, 1);
+              if (err == esphome::i2c::ERROR_OK) {
+                ESP_LOGI("m5pm1", "M5PM1 ID=0x%02X on retry", buf[0]);
+              } else {
+                ESP_LOGE("m5pm1", "M5PM1 I2C FAILED after retry");
+              }
+            }
+    - priority: 200
+      then:
+        - delay: 200ms
+        - lambda: |-
+            uint8_t cmd[2];
+            cmd[0] = 0x09; cmd[1] = 0x00;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            cmd[0] = 0x06; cmd[1] = 0x1F;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            cmd[0] = 0x16; cmd[1] = 0x00;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            cmd[0] = 0x10; cmd[1] = 0x04;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            cmd[0] = 0x13; cmd[1] = 0x00;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            cmd[0] = 0x11; cmd[1] = 0x04;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            ESP_LOGI("m5pm1", "M5PM1 PYG2 configured: L3B ON");
+        - delay: 100ms
+        - light.turn_on: sticks3_backlight
+        - delay: 200ms
+        - component.update: sticks3_display
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_FLASH_SIZE: "8388608"
+      CONFIG_PARTITION_TABLE_CUSTOM: "y"
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_MHZ: "240"
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+web_server:
+  port: 80
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+  reboot_timeout: 10min
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+i2c:
+  - id: bsp_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: false
+
+spi:
+  clk_pin: GPIO40
+  mosi_pin: GPIO39
+
+time:
+  - platform: homeassistant
+    id: esptime
+
+# ── Audio (I2S) ──
+i2s_audio:
+  i2s_lrclk_pin: GPIO15
+  i2s_bclk_pin: GPIO17
+  i2s_mclk_pin: GPIO18
+
+microphone:
+  - platform: i2s_audio
+    id: mic_a
+    adc_type: external
+    i2s_din_pin: GPIO16
+    pdm: false
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: stereo
+
+speaker:
+  - platform: i2s_audio
+    id: speaker_a
+    dac_type: external
+    i2s_dout_pin: GPIO14
+    sample_rate: 16000
+    bits_per_sample: 16bit
+
+media_player:
+  - platform: speaker
+    name: "StickS3 Speaker"
+    id: sticks3_speaker
+    announcement_pipeline:
+      speaker: speaker_a
+      format: WAV
+      sample_rate: 24000
+      num_channels: 1
+
+# ── Voice Assistant (button-triggered, via HA pipeline) ──
+voice_assistant:
+  microphone: mic_a
+  media_player: sticks3_speaker
+  use_wake_word: false
+  noise_suppression_level: 2
+  volume_multiplier: 2.0
+  on_start:
+    - lambda: |-
+        id(display_mode) = 1;
+        id(sticks3_display).update();
+    - logger.log: "Voice started"
+  on_end:
+    - lambda: |-
+        id(display_mode) = 0;
+        id(sticks3_display).update();
+    - logger.log: "Voice ended"
+  on_listening:
+    - lambda: |-
+        id(display_mode) = 1;
+    - component.update: sticks3_display
+  on_error:
+    - lambda: |-
+        id(display_mode) = 0;
+    - logger.log: "Voice error"
+  on_tts_start:
+    - lambda: |-
+        id(display_mode) = 2;
+    - component.update: sticks3_display
+  on_tts_end:
+    - lambda: |-
+        if (id(display_mode) == 2) { id(display_mode) = 0; }
+    - component.update: sticks3_display
+
+# ── Outputs ──
+output:
+  - platform: gpio
+    pin: GPIO38
+    id: backlight_gpio
+
+light:
+  - platform: binary
+    name: "StickS3 Backlight"
+    id: sticks3_backlight
+    output: backlight_gpio
+    restore_mode: ALWAYS_ON
+
+# ── Display (ST7789P3, 135x240) ──
+display:
+  - platform: st7789v
+    model: TTGO TDisplay 135x240
+    cs_pin: GPIO41
+    dc_pin: GPIO45
+    reset_pin: GPIO21
+    rotation: 0°
+    update_interval: 1s
+    id: sticks3_display
+    pages:
+      - id: page_main
+        lambda: |-
+          it.fill(Color(5, 5, 15));
+          int mode = id(display_mode);
+          if (mode == 0) {
+            it.strftime(0, 0, id(font_lg), Color(100, 200, 255), TextAlign::TOP_LEFT, "%H:%M", id(esptime).now());
+            it.printf(0, 60, id(font_md), Color::WHITE, "Idle");
+          } else if (mode == 1) {
+            it.printf(0, 0, id(font_lg), Color(0, 255, 100), TextAlign::TOP_LEFT, "Listening...");
+            it.printf(4, 95, id(font_sm), Color(0, 180, 80), "o o o");
+          } else if (mode == 2) {
+            it.printf(0, 0, id(font_lg), Color(255, 180, 0), TextAlign::TOP_LEFT, "Speaking");
+          } else if (mode == 9) {
+            it.printf(0, 0, id(font_lg), Color(100, 200, 255), TextAlign::TOP_LEFT, "%s", id(display_line1).c_str());
+            if (id(display_line2).length() > 0) {
+              it.printf(0, 42, id(font_md), Color::WHITE, "%s", id(display_line2).c_str());
+            }
+            if (id(display_line3).length() > 0) {
+              it.printf(0, 70, id(font_sm), Color(200, 200, 200), "%s", id(display_line3).c_str());
+            }
+          }
+
+font:
+  - file: "gfonts://Figtree"
+    id: font_lg
+    size: 32
+    glyphs: " !\"%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz"
+  - file: "gfonts://Figtree"
+    id: font_md
+    size: 20
+    glyphs: " !\"%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz"
+  - file: "gfonts://Figtree"
+    id: font_sm
+    size: 14
+    glyphs: " !\"%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz"
+
+globals:
+  - id: display_mode
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: display_line1
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+  - id: display_line2
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+  - id: display_line3
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+  - id: pushed_text_timer
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: idle_counter
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: accel_x_prev
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: accel_y_prev
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: accel_z_prev
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+script:
+  - id: sticks3_set_display_text
+    parameters:
+      line1: std::string
+      line2: std::string
+      line3: std::string
+    then:
+      - lambda: |-
+          id(display_line1) = line1;
+          id(display_line2) = line2;
+          id(display_line3) = line3;
+          id(display_mode) = 9;
+          id(pushed_text_timer) = 100;
+          id(sticks3_display).update();
+
+text:
+  - platform: template
+    id: display_text_line1
+    name: "StickS3 Display Line 1"
+    mode: text
+    update_interval: 1s
+    lambda: 'return id(display_line1);'
+    set_action:
+      - lambda: |-
+          id(display_line1) = x;
+          id(display_mode) = 9;
+          id(pushed_text_timer) = 100;
+          id(sticks3_display).update();
+  - platform: template
+    id: display_text_line2
+    name: "StickS3 Display Line 2"
+    mode: text
+    update_interval: 1s
+    lambda: 'return id(display_line2);'
+    set_action:
+      - lambda: |-
+          id(display_line2) = x;
+          id(display_mode) = 9;
+          id(pushed_text_timer) = 100;
+          id(sticks3_display).update();
+  - platform: template
+    id: display_text_line3
+    name: "StickS3 Display Line 3"
+    mode: text
+    update_interval: 1s
+    lambda: 'return id(display_line3);'
+    set_action:
+      - lambda: |-
+          id(display_line3) = x;
+          id(display_mode) = 9;
+          id(pushed_text_timer) = 100;
+          id(sticks3_display).update();
+
+interval:
+  - id: update_interval_display
+    interval: 1s
+    then:
+      - lambda: |-
+          if (id(pushed_text_timer) > 0) {
+            id(pushed_text_timer)--;
+            if (id(pushed_text_timer) == 0 && id(display_mode) == 9) {
+              id(display_mode) = 0;
+            }
+          }
+
+binary_sensor:
+  - platform: gpio
+    name: "Button KEY1"
+    pin:
+      number: GPIO11
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      - lambda: |-
+          id(idle_counter) = 0;
+      - voice_assistant.start
+
+  - platform: gpio
+    name: "Button KEY2"
+    pin:
+      number: GPIO12
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      - lambda: |-
+          id(idle_counter) = 0;
+      - voice_assistant.start
+
+sensor:
+  - platform: mpu6886
+    id: imu
+    i2c_id: bsp_i2c
+    address: 0x68
+    accel_x:
+      name: "StickS3 Accel X"
+      id: accel_x
+      internal: true
+    accel_y:
+      name: "StickS3 Accel Y"
+      id: accel_y
+      internal: true
+    accel_z:
+      name: "StickS3 Accel Z"
+      id: accel_z
+      internal: true
+    update_interval: 1s
