@@ -1,0 +1,178 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    - priority: 200
+      then:
+        - delay: 200ms
+        - lambda: |-
+            uint8_t cmd[2];
+            // I2C sleep timeout = 0 (no sleep)
+            cmd[0] = 0x09; cmd[1] = 0x00;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            // PWR_CFG: all rails on
+            cmd[0] = 0x06; cmd[1] = 0x1F;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            // GPIO_FUNC0: all GPIO mode
+            cmd[0] = 0x16; cmd[1] = 0x00;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            // GPIO_MODE: PYG2 output
+            cmd[0] = 0x10; cmd[1] = 0x04;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            // GPIO_DRV: push-pull
+            cmd[0] = 0x13; cmd[1] = 0x04;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            // GPIO_OUT: PYG2 HIGH (L3B backlight on)
+            cmd[0] = 0x11; cmd[1] = 0x04;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            ESP_LOGI("m5pm1", "M5PM1: L3B ON (backlight)");
+        - delay: 100ms
+        - light.turn_on: sticks3_backlight
+        - delay: 200ms
+        - component.update: sticks3_display
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_FLASH_SIZE: "8388608"
+      CONFIG_PARTITION_TABLE_CUSTOM: "y"
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_MHZ: "240"
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+web_server:
+  port: 80
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+  reboot_timeout: 30min
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+i2c:
+  - id: bsp_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: false
+
+spi:
+  clk_pin: GPIO40
+  mosi_pin: GPIO39
+
+time:
+  - platform: homeassistant
+    id: esptime
+
+# ── Backlight ──
+output:
+  - platform: gpio
+    pin: GPIO38
+    id: backlight_gpio
+
+light:
+  - platform: binary
+    name: "StickS3 Backlight"
+    id: sticks3_backlight
+    output: backlight_gpio
+    restore_mode: ALWAYS_ON
+
+# ── Sensors ──
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+
+  # Battery via M5PM1 register 0x22-0x23
+  - platform: template
+    name: "Battery"
+    id: battery
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    update_interval: 30s
+    lambda: |-
+      uint8_t reg = 0x22;
+      uint8_t buf[2];
+      if (id(bsp_i2c)->write(0x6E, &reg, 1) == esphome::i2c::ERROR_OK) {
+        delay(1);
+        if (id(bsp_i2c)->read(0x6E, buf, 2) == esphome::i2c::ERROR_OK) {
+          uint16_t raw = (buf[1] << 8) | buf[0];
+          return (float)raw / 1000.0;
+        }
+      }
+      return NAN;
+
+# ── Display (no audio, stable) ──
+display:
+  - platform: st7789v
+    model: TTGO TDisplay 135x240
+    cs_pin: GPIO41
+    dc_pin: GPIO45
+    reset_pin: GPIO21
+    rotation: 0°
+    update_interval: 1s
+    id: sticks3_display
+    lambda: |-
+      it.fill(Color(5, 5, 15));
+      it.strftime(0, 2, id(font_lg), Color(100, 200, 255), TextAlign::TOP_LEFT, "%H:%M", id(esptime).now());
+      float vbat = id(battery).get_state();
+      if (!isnan(vbat)) {
+        int pct = (int)((vbat - 3.2) / (4.2 - 3.2) * 100);
+        if (pct < 0) pct = 0;
+        if (pct > 100) pct = 100;
+        char buf[32];
+        sprintf(buf, "BAT %.2fV %d%%", vbat, pct);
+        it.printf(0, 50, id(font_md), Color::WHITE, "%s", buf);
+      }
+      it.printf(0, 80, id(font_md), Color(100, 180, 100), "Stable v1");
+      it.printf(0, 200, id(font_sm), Color(80, 80, 80), "192.168.1.222");
+
+font:
+  - file: "gfonts://Figtree"
+    id: font_lg
+    size: 32
+    glyphs: " !\"%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz"
+  - file: "gfonts://Figtree"
+    id: font_md
+    size: 18
+    glyphs: " !\"%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz"
+  - file: "gfonts://Figtree"
+    id: font_sm
+    size: 12
+    glyphs: " !\"&'()*+,-/0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz"
+
+binary_sensor:
+  - platform: gpio
+    name: "KEY1"
+    pin:
+      number: GPIO11
+      mode: INPUT_PULLUP
+      inverted: true
+  - platform: gpio
+    name: "KEY2"
+    pin:
+      number: GPIO12
+      mode: INPUT_PULLUP
+      inverted: true
