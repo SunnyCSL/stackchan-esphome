@@ -9,6 +9,7 @@ esphome:
     - priority: -100
       then:
         - lambda: |-
+            // M5PM1 I2C init for backlight + speaker amp
             uint8_t buf[1];
             auto err = id(bsp_i2c)->read(0x6E, buf, 1);
             if (err == esphome::i2c::ERROR_OK) {
@@ -28,19 +29,25 @@ esphome:
         - delay: 200ms
         - lambda: |-
             uint8_t cmd[2];
+            // I2C sleep timeout 0
             cmd[0] = 0x09; cmd[1] = 0x00;
             id(bsp_i2c)->write(0x6E, cmd, 2);
+            // PWR_CFG: all power rails on
             cmd[0] = 0x06; cmd[1] = 0x1F;
             id(bsp_i2c)->write(0x6E, cmd, 2);
+            // GPIO_FUNC0: all GPIO mode
             cmd[0] = 0x16; cmd[1] = 0x00;
             id(bsp_i2c)->write(0x6E, cmd, 2);
-            cmd[0] = 0x10; cmd[1] = 0x04;
+            // GPIO_MODE: PYG2(bit2) + PYG3(bit3) output
+            cmd[0] = 0x10; cmd[1] = 0x0C;
             id(bsp_i2c)->write(0x6E, cmd, 2);
-            cmd[0] = 0x13; cmd[1] = 0x00;
+            // GPIO_DRV: PYG2 + PYG3 push-pull
+            cmd[0] = 0x13; cmd[1] = 0x0C;
             id(bsp_i2c)->write(0x6E, cmd, 2);
-            cmd[0] = 0x11; cmd[1] = 0x04;
+            // GPIO_OUT: PYG2 HIGH(L3B) + PYG3 HIGH(SPK AMP)
+            cmd[0] = 0x11; cmd[1] = 0x0C;
             id(bsp_i2c)->write(0x6E, cmd, 2);
-            ESP_LOGI("m5pm1", "M5PM1 PYG2 configured: L3B ON");
+            ESP_LOGI("m5pm1", "M5PM1: L3B ON, SPK AMP ON, push-pull");
         - delay: 100ms
         - light.turn_on: sticks3_backlight
         - delay: 200ms
@@ -97,18 +104,17 @@ time:
   - platform: homeassistant
     id: esptime
 
-# ── Audio DAC (ES8311) — I2C init required for mic/speaker on StickS3 ──
+# ── Audio ──
 audio_dac:
   - platform: es8311
     id: es8311_dac
     bits_per_sample: 16bit
-    sample_rate: 48000
+    sample_rate: 16000
     use_microphone: true
     mic_gain: 42DB
     use_mclk: false
     i2c_id: bsp_i2c
 
-# ── Audio (I2S) ──
 i2s_audio:
   i2s_lrclk_pin: GPIO15
   i2s_bclk_pin: GPIO17
@@ -131,6 +137,7 @@ speaker:
     i2s_dout_pin: GPIO14
     sample_rate: 16000
     bits_per_sample: 16bit
+    channel: left
     audio_dac: es8311_dac
 
 media_player:
@@ -140,16 +147,15 @@ media_player:
     announcement_pipeline:
       speaker: speaker_a
       format: WAV
-      sample_rate: 24000
+      sample_rate: 16000
       num_channels: 1
 
-# ── Voice Assistant (button-triggered, via HA pipeline) ──
 voice_assistant:
   microphone: mic_a
   media_player: sticks3_speaker
   use_wake_word: false
   noise_suppression_level: 2
-  volume_multiplier: 2.0
+  volume_multiplier: 4.0
   on_start:
     - lambda: |-
         id(display_mode) = 1;
@@ -190,7 +196,33 @@ light:
     output: backlight_gpio
     restore_mode: ALWAYS_ON
 
-# ── Display (ST7789P3, 135x240) ──
+# ── Sensors ──
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    id: wifi_signal_db
+    update_interval: 60s
+
+# Battery voltage via M5PM1 (I2C read register 0x22-0x23)
+  - platform: template
+    name: "Battery Voltage"
+    id: battery_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    update_interval: 30s
+    lambda: |-
+      uint8_t reg = 0x22;
+      uint8_t buf[2];
+      if (id(bsp_i2c)->write(0x6E, &reg, 1) == esphome::i2c::ERROR_OK) {
+        if (id(bsp_i2c)->read(0x6E, buf, 2) == esphome::i2c::ERROR_OK) {
+          uint16_t raw = (buf[1] << 8) | buf[0];
+          float mv = (float)raw * 1.0;
+          return mv / 1000.0;
+        }
+      }
+      return NAN;
+
+# ── Display ──
 display:
   - platform: st7789v
     model: TTGO TDisplay 135x240
@@ -206,8 +238,18 @@ display:
           it.fill(Color(5, 5, 15));
           int mode = id(display_mode);
           if (mode == 0) {
+            // Idle — show time + battery
             it.strftime(0, 0, id(font_lg), Color(100, 200, 255), TextAlign::TOP_LEFT, "%H:%M", id(esptime).now());
-            it.printf(0, 60, id(font_md), Color::WHITE, "Idle");
+            // Battery
+            float vbat = id(battery_voltage).get_state();
+            if (!isnan(vbat)) {
+              char bat_str[16];
+              sprintf(bat_str, "%.2fV %.0f%%", vbat, (vbat - 3.0) / (4.2 - 3.0) * 100.0);
+              it.printf(0, 60, id(font_md), Color::WHITE, "%s", bat_str);
+            } else {
+              it.printf(0, 60, id(font_md), Color(100, 100, 100), "BAT: --");
+            }
+            it.printf(0, 90, id(font_sm), Color(100, 180, 100), "Ready");
           } else if (mode == 1) {
             it.printf(0, 0, id(font_lg), Color(0, 255, 100), TextAlign::TOP_LEFT, "Listening...");
             it.printf(4, 95, id(font_sm), Color(0, 180, 80), "o o o");
@@ -221,6 +263,13 @@ display:
             if (id(display_line3).length() > 0) {
               it.printf(0, 70, id(font_sm), Color(200, 200, 200), "%s", id(display_line3).c_str());
             }
+          }
+          // Bottom status bar
+          float vbat = id(battery_voltage).get_state();
+          if (!isnan(vbat)) {
+            char bat_str[16];
+            sprintf(bat_str, "%.2fV", vbat);
+            it.printf(135, 230, id(font_sm), Color(100, 200, 100), TextAlign::BOTTOM_RIGHT, "%s", bat_str);
           }
 
 font:
@@ -255,22 +304,6 @@ globals:
     restore_value: false
     initial_value: '""'
   - id: pushed_text_timer
-    type: int
-    restore_value: false
-    initial_value: '0'
-  - id: idle_counter
-    type: int
-    restore_value: false
-    initial_value: '0'
-  - id: accel_x_prev
-    type: int
-    restore_value: false
-    initial_value: '0'
-  - id: accel_y_prev
-    type: int
-    restore_value: false
-    initial_value: '0'
-  - id: accel_z_prev
     type: int
     restore_value: false
     initial_value: '0'
@@ -349,14 +382,6 @@ binary_sensor:
       inverted: true
     on_press:
       - logger.log: "KEY1 pressed"
-      - lambda: |-
-          // I2C probe
-          uint8_t tmp;
-          auto err18 = id(bsp_i2c)->read(0x18, &tmp, 1);
-          ESP_LOGI("i2c", "ES8311(0x18) probe: %s", err18 == esphome::i2c::ERROR_OK ? "OK" : "FAIL");
-          auto err6e = id(bsp_i2c)->read(0x6E, &tmp, 1);
-          ESP_LOGI("i2c", "M5PM1(0x6E) probe: %s", err6e == esphome::i2c::ERROR_OK ? "OK" : "FAIL");
-          id(idle_counter) = 0;
       - voice_assistant.stop:
       - voice_assistant.start
 
@@ -368,11 +393,7 @@ binary_sensor:
       inverted: true
     on_press:
       - logger.log: "KEY2 pressed"
-      - lambda: |-
-          id(idle_counter) = 0;
       - voice_assistant.stop:
       - voice_assistant.start
-
-sensor:
 
 # IMU removed for troubleshooting

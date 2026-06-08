@@ -9,6 +9,7 @@ esphome:
     - priority: -100
       then:
         - lambda: |-
+            // M5PM1 I2C init for backlight + speaker amp (L3B via PYG2, SPK_Pulse via PYG3)
             uint8_t buf[1];
             auto err = id(bsp_i2c)->read(0x6E, buf, 1);
             if (err == esphome::i2c::ERROR_OK) {
@@ -34,13 +35,19 @@ esphome:
             id(bsp_i2c)->write(0x6E, cmd, 2);
             cmd[0] = 0x16; cmd[1] = 0x00;
             id(bsp_i2c)->write(0x6E, cmd, 2);
-            cmd[0] = 0x10; cmd[1] = 0x04;
+            // GPIO_MODE: PYG2(bit2) + PYG3(bit3) as output = 0x0C
+            cmd[0] = 0x10; cmd[1] = 0x0C;
             id(bsp_i2c)->write(0x6E, cmd, 2);
-            cmd[0] = 0x13; cmd[1] = 0x00;
+            // GPIO_DRV: PYG2 + PYG3 push-pull (not open-drain!) = 0x0C
+            cmd[0] = 0x13; cmd[1] = 0x0C;
             id(bsp_i2c)->write(0x6E, cmd, 2);
-            cmd[0] = 0x11; cmd[1] = 0x04;
+            // GPIO_OUT: PYG2 HIGH (L3B on) + PYG3 HIGH (SPK amp enable) = 0x0C
+            cmd[0] = 0x11; cmd[1] = 0x0C;
             id(bsp_i2c)->write(0x6E, cmd, 2);
-            ESP_LOGI("m5pm1", "M5PM1 PYG2 configured: L3B ON");
+            // AW8737A pulse: REFRESH + NUM=3(max gain) + GPIO3 = 0xE3
+            cmd[0] = 0x53; cmd[1] = 0xE3;
+            id(bsp_i2c)->write(0x6E, cmd, 2);
+            ESP_LOGI("m5pm1", "M5PM1: PYG2+PYG3 push-pull, L3B ON, SPK AMP ON, AW8737 max gain");
         - delay: 100ms
         - light.turn_on: sticks3_backlight
         - delay: 200ms
@@ -97,18 +104,18 @@ time:
   - platform: homeassistant
     id: esptime
 
-# ── Audio DAC (ES8311) — I2C init required for mic/speaker on StickS3 ──
+# ── Audio DAC (ES8311) — I2C init for mic + speaker on StickS3 ──
 audio_dac:
   - platform: es8311
     id: es8311_dac
     bits_per_sample: 16bit
-    sample_rate: 48000
+    sample_rate: 16000
     use_microphone: true
     mic_gain: 42DB
     use_mclk: false
     i2c_id: bsp_i2c
 
-# ── Audio (I2S) ──
+# ── Audio (I2S) — ES8311 shares I2S bus for both mic & speaker ──
 i2s_audio:
   i2s_lrclk_pin: GPIO15
   i2s_bclk_pin: GPIO17
@@ -131,6 +138,7 @@ speaker:
     i2s_dout_pin: GPIO14
     sample_rate: 16000
     bits_per_sample: 16bit
+    channel: left
     audio_dac: es8311_dac
 
 media_player:
@@ -140,16 +148,16 @@ media_player:
     announcement_pipeline:
       speaker: speaker_a
       format: WAV
-      sample_rate: 24000
+      sample_rate: 16000
       num_channels: 1
 
-# ── Voice Assistant (button-triggered, via HA pipeline) ──
+# ── Voice Assistant (button-triggered, no wake word) ──
 voice_assistant:
   microphone: mic_a
   media_player: sticks3_speaker
   use_wake_word: false
   noise_suppression_level: 2
-  volume_multiplier: 2.0
+  volume_multiplier: 4.0
   on_start:
     - lambda: |-
         id(display_mode) = 1;
@@ -262,18 +270,6 @@ globals:
     type: int
     restore_value: false
     initial_value: '0'
-  - id: accel_x_prev
-    type: int
-    restore_value: false
-    initial_value: '0'
-  - id: accel_y_prev
-    type: int
-    restore_value: false
-    initial_value: '0'
-  - id: accel_z_prev
-    type: int
-    restore_value: false
-    initial_value: '0'
 
 script:
   - id: sticks3_set_display_text
@@ -350,12 +346,6 @@ binary_sensor:
     on_press:
       - logger.log: "KEY1 pressed"
       - lambda: |-
-          // I2C probe
-          uint8_t tmp;
-          auto err18 = id(bsp_i2c)->read(0x18, &tmp, 1);
-          ESP_LOGI("i2c", "ES8311(0x18) probe: %s", err18 == esphome::i2c::ERROR_OK ? "OK" : "FAIL");
-          auto err6e = id(bsp_i2c)->read(0x6E, &tmp, 1);
-          ESP_LOGI("i2c", "M5PM1(0x6E) probe: %s", err6e == esphome::i2c::ERROR_OK ? "OK" : "FAIL");
           id(idle_counter) = 0;
       - voice_assistant.stop:
       - voice_assistant.start

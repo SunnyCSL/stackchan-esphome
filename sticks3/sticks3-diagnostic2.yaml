@@ -1,0 +1,114 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    priority: 200
+    then:
+      - lambda: |-
+          ESP_LOGI("diagnostic", "=== DIAGNOSTIC FIRMWARE ===");
+          // I2C scan
+          uint8_t addr;
+          for (addr = 1; addr < 128; addr++) {
+            auto err = id(bsp_i2c)->read(addr, nullptr, 0);
+            if (err == esphome::i2c::ERROR_OK) {
+              ESP_LOGI("diagnostic", "I2C device found at 0x%02X", addr);
+            }
+          }
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+web_server:
+  port: 80
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+i2c:
+  - id: bsp_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: true
+    frequency: 100kHz
+
+i2s_audio:
+  i2s_lrclk_pin: GPIO15
+  i2s_bclk_pin: GPIO17
+  i2s_mclk_pin: GPIO18
+
+output:
+  - platform: gpio
+    pin: GPIO38
+    id: backlight_gpio
+
+light:
+  - platform: binary
+    name: "Backlight"
+    id: sticks3_backlight
+    output: backlight_gpio
+    restore_mode: ALWAYS_ON
+
+binary_sensor:
+  - platform: gpio
+    name: "Button KEY1"
+    pin:
+      number: GPIO11
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      then:
+        - lambda: |-
+            ESP_LOGI("diagnostic", "KEY1 pressed - testing ES8311 init");
+            // Try to init ES8311 directly via I2C
+            // ES8311 address 0x18
+            uint8_t data[2];
+            data[0] = 0x00;  // ES8311_REG_RESET
+            data[1] = 0x1F;  // reset value
+            id(bsp_i2c)->write(0x18, data, 2);
+            delay(10);
+            // Read register 0x00 to confirm
+            data[0] = 0x00;
+            id(bsp_i2c)->write(0x18, data, 1);
+            delay(5);
+            id(bsp_i2c)->read(0x18, data, 1);
+            ESP_LOGI("diagnostic", "ES8311 REG0x00=0x%02X (expect 0x1F)", data[0]);
+
+  - platform: gpio
+    name: "Button KEY2"
+    pin:
+      number: GPIO12
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      then:
+        - lambda: |-
+            ESP_LOGI("diagnostic", "KEY2 pressed - I2C rescan");
+            for (uint8_t addr = 1; addr < 128; addr++) {
+              auto err = id(bsp_i2c)->read(addr, nullptr, 0);
+              if (err == esphome::i2c::ERROR_OK) {
+                ESP_LOGI("diagnostic", "I2C device found at 0x%02X", addr);
+              }
+            }

@@ -1,0 +1,133 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_FLASH_SIZE: "8388608"
+      CONFIG_PARTITION_TABLE_CUSTOM: "y"
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_MHZ: "240"
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+i2c:
+  - id: bsp_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: true
+
+time:
+  - platform: homeassistant
+    id: esptime
+
+# ── Audio (I2S) ──
+i2s_audio:
+  i2s_lrclk_pin: GPIO15
+  i2s_bclk_pin: GPIO17
+  i2s_mclk_pin: GPIO18
+
+microphone:
+  - platform: i2s_audio
+    id: mic_a
+    adc_type: external
+    i2s_din_pin: GPIO16
+    pdm: false
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: mono
+
+speaker:
+  - platform: i2s_audio
+    id: speaker_a
+    dac_type: external
+    i2s_dout_pin: GPIO14
+    sample_rate: 16000
+    bits_per_sample: 16bit
+
+media_player:
+  - platform: speaker
+    name: "StickS3 Speaker"
+    id: sticks3_speaker
+    announcement_pipeline:
+      speaker: speaker_a
+      format: WAV
+      sample_rate: 24000
+      num_channels: 1
+
+# ── Voice Assistant ──
+voice_assistant:
+  microphone: mic_a
+  speaker: speaker_a
+  use_wake_word: false
+  noise_suppression_level: 2
+  volume_multiplier: 2.0
+  on_start:
+    - logger.log: "Voice started"
+  on_end:
+    - logger.log: "Voice ended"
+  on_listening:
+    - logger.log: "Listening"
+  on_error:
+    - logger.log: "Voice error"
+
+# ── Buttons ──
+binary_sensor:
+  - platform: gpio
+    name: "Button KEY1"
+    pin:
+      number: GPIO11
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      - voice_assistant.start
+
+  - platform: gpio
+    name: "Button KEY2"
+    pin:
+      number: GPIO12
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      - voice_assistant.start
+
+# ── Backlight (just keep on) ──
+output:
+  - platform: gpio
+    pin: GPIO38
+    id: backlight_gpio
+
+light:
+  - platform: binary
+    name: "StickS3 Backlight"
+    id: sticks3_backlight
+    output: backlight_gpio
+    restore_mode: ALWAYS_ON

@@ -1,0 +1,154 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    then:
+      - lambda: |-
+          ESP_LOGI("boot", "Boot complete, I2C probing...");
+          uint8_t tmp;
+          auto i2c = id(bsp_i2c);
+          for (int addr = 0x10; addr < 0x70; addr++) {
+            auto err = i2c->read(addr, &tmp, 1);
+            if (err == esphome::i2c::ERROR_OK) {
+              ESP_LOGI("boot", "I2C found: 0x%02X", addr);
+            }
+          }
+          ESP_LOGI("boot", "I2C scan done");
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_FLASH_SIZE: "8388608"
+      CONFIG_PARTITION_TABLE_CUSTOM: "y"
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+i2c:
+  - id: bsp_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: true
+
+i2s_audio:
+  i2s_lrclk_pin: GPIO15
+  i2s_bclk_pin: GPIO17
+  i2s_mclk_pin: GPIO18
+
+audio_dac:
+  - platform: es8311
+    id: es8311_dac
+    bits_per_sample: 16bit
+    sample_rate: 48000
+    use_microphone: true
+    mic_gain: 42DB
+    use_mclk: false
+    i2c_id: bsp_i2c
+
+microphone:
+  - platform: i2s_audio
+    id: mic_a
+    adc_type: external
+    i2s_din_pin: GPIO16
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: left
+
+speaker:
+  - platform: i2s_audio
+    id: speaker_a
+    dac_type: external
+    i2s_dout_pin: GPIO14
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    audio_dac: es8311_dac
+
+media_player:
+  - platform: speaker
+    name: "StickS3 Speaker"
+    id: sticks3_speaker
+    announcement_pipeline:
+      speaker: speaker_a
+      format: WAV
+      sample_rate: 24000
+      num_channels: 1
+
+voice_assistant:
+  microphone: mic_a
+  media_player: sticks3_speaker
+  use_wake_word: false
+  noise_suppression_level: 2
+  volume_multiplier: 2.0
+  on_start:
+    - logger.log: "VA: STARTED"
+  on_listening:
+    - logger.log: "VA: LISTENING"
+  on_end:
+    - logger.log: "VA: ENDED"
+  on_error:
+    - logger.log: "VA: ERROR"
+  on_tts_start:
+    - logger.log: "VA: TTS START"
+  on_tts_end:
+    - logger.log: "VA: TTS END"
+
+binary_sensor:
+  - platform: gpio
+    name: "Button KEY1"
+    pin:
+      number: GPIO11
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      - logger.log: "KEY1 PRESSED"
+      - media_player.play_media:
+          id: sticks3_speaker
+          media_url: "http://192.168.1.145:8123/local/silence.wav"
+      - voice_assistant.stop:
+      - voice_assistant.start
+
+  - platform: gpio
+    name: "Button KEY2"
+    pin:
+      number: GPIO12
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      - logger.log: "KEY2 PRESSED"
+      - voice_assistant.stop:
+      - voice_assistant.start
+
+output:
+  - platform: gpio
+    pin: GPIO38
+    id: backlight_gpio
+
+light:
+  - platform: binary
+    name: "Backlight"
+    id: sticks3_backlight
+    output: backlight_gpio
+    restore_mode: ALWAYS_ON
