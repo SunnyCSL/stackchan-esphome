@@ -71,11 +71,7 @@ esp32:
   variant: esp32s3
   flash_size: 8MB
   framework:
-    type: esp-idf
-    sdkconfig_options:
-      CONFIG_FLASH_SIZE: "8388608"
-      CONFIG_PARTITION_TABLE_CUSTOM: "y"
-      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_MHZ: "240"
+    type: arduino
 
 psram:
   mode: octal
@@ -316,6 +312,7 @@ microphone:
     sample_rate: 16000
     bits_per_sample: 16bit
     channel: stereo
+    use_apll: true
 
 speaker:
   - platform: i2s_audio
@@ -325,6 +322,7 @@ speaker:
     sample_rate: 16000
     bits_per_sample: 16bit
     channel: mono
+    use_apll: true
 
 # ── Voice Assistant (local pipeline) ──
 voice_assistant:

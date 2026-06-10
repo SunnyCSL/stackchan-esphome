@@ -1,0 +1,6 @@
+#!/home/radxa/stackchan-esphome/sticks3/esphome-venv/bin/python3.11
+import sys
+from aioesphomeapi.log_reader import cli_entry_point
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    sys.exit(cli_entry_point())
