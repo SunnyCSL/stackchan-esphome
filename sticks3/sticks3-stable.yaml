@@ -24,22 +24,21 @@ esphome:
             id(bsp_i2c).write(0x6E, cmd, 2);
             delay(10);
 
-            // 2. Disable watchdog (reg 0x0A = 0x00) — CRITICAL! Prevents M5PM1 reset
+            // 2. Disable watchdog (reg 0x0A = 0x00)
             cmd[0] = 0x0A; cmd[1] = 0x00;
             id(bsp_i2c).write(0x6E, cmd, 2);
             delay(10);
 
-            // 3. PWR_CFG: all rails on (reg 0x06 = 0x1F) — includes BOOST_EN bit3
+            // 3. PWR_CFG: all rails on (reg 0x06 = 0x1F)
             cmd[0] = 0x06; cmd[1] = 0x1F;
             id(bsp_i2c).write(0x6E, cmd, 2);
             delay(10);
 
-            // 4. Read-modify-write GPIO_FUNC0: ensure PYG2 function is GPIO
-            //    M5GFX: bitOff(0x16, 0x04) — clear bit 2 for PYG2 GPIO mode
+            // 4. GPIO_FUNC0: PYG2 = GPIO function
             cmd[0] = 0x16;
             id(bsp_i2c).write(0x6E, cmd, 1);
             if (id(bsp_i2c).read(0x6E, buf, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
-              buf[0] &= ~0x04;  // clear bit 2 for PYG2 GPIO function
+              buf[0] &= ~0x04;
               cmd[0] = 0x16; cmd[1] = buf[0];
               id(bsp_i2c).write(0x6E, cmd, 2);
             }
@@ -50,8 +49,7 @@ esphome:
             id(bsp_i2c).write(0x6E, cmd, 2);
             delay(10);
 
-            // 6. GPIO_DRV: push-pull (reg 0x13, clear bit 2 = 0 for push-pull)
-            //    CRITICAL: M5GFX uses bitOff, not bitOn! 0=push-pull, 1=open-drain
+            // 6. GPIO_DRV: push-pull (reg 0x13 = 0x00)
             cmd[0] = 0x13; cmd[1] = 0x00;
             id(bsp_i2c).write(0x6E, cmd, 2);
             delay(10);
@@ -116,9 +114,14 @@ spi:
   clk_pin: GPIO40
   mosi_pin: GPIO39
 
+# ── Time (HA sync + NTP fallback for fast boot sync) ──
 time:
   - platform: homeassistant
     id: esptime
+    on_time:
+      - seconds: /1
+        then:
+          - component.update: sticks3_display
 
 # ── Backlight PWM (50% brightness) ──
 output:
@@ -141,7 +144,7 @@ sensor:
     name: "WiFi Signal"
     update_interval: 60s
 
-  # Battery via M5PM1 register 0x22-0x23
+  # Battery via M5PM1 register 0x22-0x23 (12-bit ADC, 1mV/LSB)
   - platform: template
     name: "Battery"
     id: battery
@@ -160,53 +163,12 @@ sensor:
       }
       return NAN;
 
-# ── Display (ST7789V via st7789v, 135x240) ──
-display:
-  - platform: st7789v
-    model: TTGO TDisplay 135x240
-    cs_pin: GPIO41
-    dc_pin: GPIO45
-    reset_pin: GPIO21
-    rotation: 0°
-    update_interval: 1s
-    id: sticks3_display
-    lambda: |-
-      it.fill(Color(5, 5, 15));
-      // Top line: time
-      it.strftime(0, 2, id(font_lg), Color(100, 200, 255), TextAlign::TOP_LEFT, "%H:%M", id(esptime).now());
-      // Battery
-      float vbat = id(battery).get_state();
-      if (!isnan(vbat)) {
-        int pct = (int)((vbat - 3.2) / (4.2 - 3.2) * 100);
-        if (pct < 0) pct = 0;
-        if (pct > 100) pct = 100;
-        char bat_buf[20];
-        sprintf(bat_buf, "%d%%", pct);
-        it.printf(90, 6, id(font_sm), Color(0, 200, 0), TextAlign::TOP_LEFT, "%s", bat_buf);
-      }
-      // Status line 1
-      it.printf(0, 52, id(font_md), Color::WHITE, "%s", id(display_line1).c_str());
-      // Status line 2
-      it.printf(0, 80, id(font_md), Color(200, 200, 200), "%s", id(display_line2).c_str());
-      // IP at bottom
-      it.printf(0, 200, id(font_sm), Color(80, 80, 80), "%s", id(display_line3).c_str());
-
-font:
-  - file: "gfonts://Figtree"
-    id: font_lg
-    size: 32
-    glyphs: " !\"%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz"
-  - file: "gfonts://Figtree"
-    id: font_md
-    size: 18
-    glyphs: " !\"%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz"
-  - file: "gfonts://Figtree"
-    id: font_sm
-    size: 12
-    glyphs: " !\"&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz"
-    # Include period for battery percentage
-
+# ── Voice state (shared between voice_assistant callbacks and display) ──
 globals:
+  - id: voice_state
+    type: std::string
+    restore_value: false
+    initial_value: '"Idle"'
   - id: display_line1
     type: std::string
     restore_value: false
@@ -214,12 +176,13 @@ globals:
   - id: display_line2
     type: std::string
     restore_value: false
-    initial_value: '""'
+    initial_value: '"KEY1=Talk"'
   - id: display_line3
     type: std::string
     restore_value: false
     initial_value: '"192.168.1.222"'
 
+# ── Text entities (pushable from HA) ──
 text:
   - platform: template
     name: "StickS3 Line 1"
@@ -252,7 +215,86 @@ text:
         - lambda: id(display_line3) = x;
         - component.update: sticks3_display
 
-# ── Voice Pipeline (I2S Audio + Wake Word) ──
+# ── Display (ST7789V 135x240) ──
+display:
+  - platform: st7789v
+    model: TTGO TDisplay 135x240
+    cs_pin: GPIO41
+    dc_pin: GPIO45
+    reset_pin: GPIO21
+    rotation: 0°
+    update_interval: 1s
+    id: sticks3_display
+    lambda: |-
+      it.fill(Color(5, 5, 15));
+
+      // ── Top: Clock (big, left-aligned with padding) ──
+      auto time = id(esptime).now();
+      if (time.is_valid()) {
+        it.strftime(8, 4, id(font_lg), Color(100, 200, 255), TextAlign::TOP_LEFT, "%H:%M", time);
+      } else {
+        it.printf(8, 8, id(font_lg), Color(60, 60, 80), TextAlign::TOP_LEFT, "--:--");
+      }
+
+      // ── Middle: Status lines ──
+      // Line 1 (voice state / main status)
+      it.printf(8, 52, id(font_md), Color::WHITE, "%s", id(display_line1).c_str());
+      // Line 2 (secondary status)
+      it.printf(8, 78, id(font_md), Color(160, 160, 160), "%s", id(display_line2).c_str());
+
+      // ── Bottom-right: Battery % ──
+      float vbat = id(battery).get_state();
+      if (!isnan(vbat)) {
+        int pct = (int)((vbat - 3.2) / (4.2 - 3.2) * 100);
+        if (pct < 0) pct = 0;
+        if (pct > 100) pct = 100;
+        
+        // Battery icon bar (5 segments)
+        int bar_w = 50;
+        int bar_h = 10;
+        int bar_x = 135 - bar_w - 8;
+        int bar_y = 188;
+        
+        // Frame
+        it.rectangle(bar_x, bar_y, bar_w, bar_h, Color(200, 200, 200));
+        it.filled_rectangle(bar_x + bar_w, bar_y + 3, 3, bar_h - 6, Color(200, 200, 200));
+        
+        // Fill
+        int fill_w = (pct * (bar_w - 4)) / 100;
+        Color fill_color;
+        if (pct > 60) fill_color = Color(0, 220, 0);
+        else if (pct > 20) fill_color = Color(220, 180, 0);
+        else fill_color = Color(220, 0, 0);
+        
+        if (fill_w > 0) {
+          it.filled_rectangle(bar_x + 2, bar_y + 2, fill_w, bar_h - 4, fill_color);
+        }
+        
+        // Percentage text
+        char pct_buf[8];
+        sprintf(pct_buf, "%d%%", pct);
+        it.printf(bar_x - 48, bar_y - 2, id(font_md), fill_color, TextAlign::TOP_LEFT, "%s", pct_buf);
+      }
+
+      // ── Bottom: IP address ──
+      it.printf(8, 230, id(font_sm), Color(80, 80, 80), "%s", id(display_line3).c_str());
+
+# ── Fonts ──
+font:
+  - file: "gfonts://Figtree"
+    id: font_lg
+    size: 32
+    glyphs: " !\"%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz"
+  - file: "gfonts://Figtree"
+    id: font_md
+    size: 18
+    glyphs: " !\"%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz"
+  - file: "gfonts://Figtree"
+    id: font_sm
+    size: 12
+    glyphs: " !\"&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz"
+
+# ── Voice Pipeline (I2S Audio) ──
 i2s_audio:
   i2s_lrclk_pin: GPIO15
   i2s_bclk_pin: GPIO17
@@ -291,25 +333,65 @@ micro_wake_word:
   models:
     - hey_jarvis
   on_wake_word_detected:
-    - then:
-        - homeassistant.event:
-            event: esphome.wake_word_detected
-            data:
-              device: sticks3
+    - voice_assistant.start:
 
+# ── Voice Assistant (local pipeline) ──
+voice_assistant:
+  microphone: sticks3_mic
+  speaker: sticks3_spk
+  noise_suppression_level: 2
+  auto_gain: 31dBFS
+  volume_multiplier: 2.0
+  on_listening:
+    then:
+      - lambda: |-
+          id(voice_state) = "Listening";
+          id(display_line1) = "🎤 Listening...";
+          id(display_line2) = "Speak now";
+      - component.update: sticks3_display
+  on_tts_start:
+    then:
+      - lambda: |-
+          id(voice_state) = "Responding";
+          id(display_line1) = "🤖 Speaking...";
+      - component.update: sticks3_display
+  on_stt_end:
+    then:
+      - lambda: |-
+          id(voice_state) = "STT Done";
+          id(display_line1) = "📝 Got it!";
+      - component.update: sticks3_display
+  on_end:
+    then:
+      - lambda: |-
+          id(voice_state) = "Idle";
+          id(display_line1) = "StickS3 Ready";
+          id(display_line2) = "KEY1=Talk";
+      - component.update: sticks3_display
+
+# ── Buttons ──
 binary_sensor:
   - platform: gpio
-    name: "KEY1 Voice Trigger"
+    name: "KEY1 Press"
     pin:
       number: GPIO11
       mode: INPUT_PULLUP
       inverted: true
     on_press:
-      - homeassistant.event:
-          event: esphome.button_voice_trigger
-          data:
-            device: sticks3
-            button: key1
+      - voice_assistant.start:
+      - lambda: |-
+          id(voice_state) = "Listening";
+          id(display_line1) = "🎤 Listening...";
+          id(display_line2) = "Release=stop";
+      - component.update: sticks3_display
+    on_release:
+      - voice_assistant.stop:
+      - lambda: |-
+          id(voice_state) = "Idle";
+          id(display_line1) = "StickS3 Ready";
+          id(display_line2) = "KEY1=Talk";
+      - component.update: sticks3_display
+
   - platform: gpio
     name: "KEY2"
     pin:
@@ -317,8 +399,16 @@ binary_sensor:
       mode: INPUT_PULLUP
       inverted: true
     on_press:
-      - homeassistant.event:
-          event: esphome.button_voice_trigger
-          data:
-            device: sticks3
-            button: key2
+      - voice_assistant.start:
+      - lambda: |-
+          id(voice_state) = "Listening";
+          id(display_line1) = "🎤 Listening...";
+          id(display_line2) = "Press=stop";
+      - component.update: sticks3_display
+    on_release:
+      - voice_assistant.stop:
+      - lambda: |-
+          id(voice_state) = "Idle";
+          id(display_line1) = "StickS3 Ready";
+          id(display_line2) = "KEY1=Talk";
+      - component.update: sticks3_display
