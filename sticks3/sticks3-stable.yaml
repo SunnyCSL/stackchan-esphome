@@ -103,6 +103,9 @@ ota:
 
 logger:
   level: INFO
+  hardware_uart: USB_CDC
+  logs:
+    text_sensor: WARN
 
 i2c:
   - id: bsp_i2c
@@ -150,7 +153,11 @@ sensor:
     id: battery
     unit_of_measurement: "V"
     accuracy_decimals: 2
-    update_interval: 30s
+    update_interval: 10s
+    filters:
+      - exponential_moving_average:
+          alpha: 0.3
+          send_every: 2
     lambda: |-
       uint8_t reg = 0x22;
       uint8_t buf[2];
@@ -277,7 +284,7 @@ display:
       }
 
       // ── Bottom: IP address ──
-      it.printf(8, 230, id(font_sm), Color(80, 80, 80), "%s", id(display_line3).c_str());
+      it.printf(8, 225, id(font_sm), Color(80, 80, 80), "%s", id(display_line3).c_str());
 
 # ── Fonts ──
 font:
@@ -319,93 +326,93 @@ speaker:
     bits_per_sample: 16bit
     channel: mono
 
-media_player:
-  - platform: speaker
-    name: "StickS3 Speaker"
-    id: sticks3_speaker
-    announcement_pipeline:
-      speaker: sticks3_spk
-      format: FLAC
-      sample_rate: 16000
-      num_channels: 1
-
-micro_wake_word:
-  models:
-    - hey_jarvis
-  on_wake_word_detected:
-    - voice_assistant.start:
-
 # ── Voice Assistant (local pipeline) ──
 voice_assistant:
   microphone: sticks3_mic
-  speaker: sticks3_spk
-  noise_suppression_level: 2
-  auto_gain: 31dBFS
   volume_multiplier: 2.0
+  on_client_connected:
+    then:
+      - lambda: |-
+          ESP_LOGI("va", "HA voice client CONNECTED");
+  on_client_disconnected:
+    then:
+      - lambda: |-
+          ESP_LOGW("va", "HA voice client DISCONNECTED");
+  on_error:
+    then:
+      - lambda: |-
+          ESP_LOGE("va", "Voice error: code=%d msg=%s", code, message.c_str());
   on_listening:
     then:
       - lambda: |-
           id(voice_state) = "Listening";
-          id(display_line1) = "🎤 Listening...";
-          id(display_line2) = "Speak now";
-      - component.update: sticks3_display
+          ESP_LOGI("va", "=== LISTENING ===");
   on_tts_start:
     then:
       - lambda: |-
           id(voice_state) = "Responding";
-          id(display_line1) = "🤖 Speaking...";
-      - component.update: sticks3_display
+          ESP_LOGI("va", "=== SPEAKING ===");
   on_stt_end:
     then:
       - lambda: |-
           id(voice_state) = "STT Done";
-          id(display_line1) = "📝 Got it!";
-      - component.update: sticks3_display
+          ESP_LOGI("va", "=== STT DONE ===");
   on_end:
     then:
       - lambda: |-
           id(voice_state) = "Idle";
-          id(display_line1) = "StickS3 Ready";
-          id(display_line2) = "KEY1=Talk";
-      - component.update: sticks3_display
+          ESP_LOGI("va", "=== VA END ===");
 
 # ── Buttons ──
 binary_sensor:
   - platform: gpio
-    name: "KEY1 Press"
+    name: "KEY1 Voice Trigger"
     pin:
       number: GPIO11
-      mode: INPUT_PULLUP
+      mode:
+        input: true
+        pullup: true
       inverted: true
+    id: key1
     on_press:
-      - voice_assistant.start:
       - lambda: |-
+          ESP_LOGI("key", "KEY1 PRESSED");
           id(voice_state) = "Listening";
           id(display_line1) = "🎤 Listening...";
           id(display_line2) = "Release=stop";
       - component.update: sticks3_display
+      - voice_assistant.start:
+          wake_word: "false"
     on_release:
-      - voice_assistant.stop:
       - lambda: |-
+          ESP_LOGI("key", "KEY1 RELEASED");
           id(voice_state) = "Idle";
           id(display_line1) = "StickS3 Ready";
           id(display_line2) = "KEY1=Talk";
       - component.update: sticks3_display
+      - voice_assistant.stop:
 
   - platform: gpio
     name: "KEY2"
     pin:
       number: GPIO12
-      mode: INPUT_PULLUP
+      mode:
+        input: true
+        pullup: true
       inverted: true
+    id: key2
     on_press:
-      - voice_assistant.start:
       - lambda: |-
+          ESP_LOGI("key", "KEY2 PRESSED");
           id(voice_state) = "Listening";
           id(display_line1) = "🎤 Listening...";
           id(display_line2) = "Press=stop";
       - component.update: sticks3_display
+      - voice_assistant.start:
+          wake_word: "false"
     on_release:
+      - lambda: |-
+          ESP_LOGI("key", "KEY2 RELEASED");
       - voice_assistant.stop:
       - lambda: |-
           id(voice_state) = "Idle";

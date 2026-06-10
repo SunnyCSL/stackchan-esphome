@@ -1,0 +1,64 @@
+substitutions:
+  name: sticks3-gpio-test
+  friendly_name: StickS3 GPIO Test
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    then:
+      - lambda: |-
+          ESP_LOGI("boot", "Boot complete - waiting for button press");
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.231
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+binary_sensor:
+  - platform: gpio
+    name: "KEY1 (GPIO11)"
+    pin:
+      number: GPIO11
+      inverted: true
+      mode: INPUT_PULLUP
+    id: btn_g11
+    on_press:
+      then:
+        - lambda: ESP_LOGI("btn", "KEY1 PRESSED!");
+    on_release:
+      then:
+        - lambda: ESP_LOGI("btn", "KEY1 RELEASED!");
+
+  - platform: gpio
+    name: "KEY2 (GPIO12)"
+    pin:
+      number: GPIO12
+      inverted: true
+      mode: INPUT_PULLUP
+    id: btn_g12
+    on_press:
+      then:
+        - lambda: ESP_LOGI("btn", "KEY2 PRESSED!");
+    on_release:
+      then:
+        - lambda: ESP_LOGI("btn", "KEY2 RELEASED!");
