@@ -102,8 +102,8 @@ ota:
   - platform: esphome
 
 logger:
-  level: INFO
-  hardware_uart: USB_CDC
+  level: DEBUG
+  hardware_uart: USB_SERIAL_JTAG
   logs:
     text_sensor: WARN
 
