@@ -5,6 +5,10 @@ substitutions:
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
+  platformio_options:
+    build_flags:
+      - "-DCONFIG_ESP_SYSTEM_PANIC_PRINT_BACKTRACE=1"
+      - "-DCONFIG_FREERTOS_CHECK_STACKOVERFLOW=3"
   on_boot:
     - priority: 500
       then:

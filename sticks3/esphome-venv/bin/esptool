@@ -1,6 +1,0 @@
-#!/home/radxa/stackchan-esphome/sticks3/esphome-venv/bin/python3.11
-import sys
-from esptool.__init__ import _main
-if __name__ == '__main__':
-    sys.argv[0] = sys.argv[0].removesuffix('.exe')
-    sys.exit(_main())

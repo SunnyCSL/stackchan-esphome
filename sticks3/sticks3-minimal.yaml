@@ -5,30 +5,24 @@ substitutions:
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
-  on_boot:
-    - priority: 200
-      then:
-        - delay: 200ms
-        - output.turn_on: bl_pin
-        - component.update: sticks3_display
 
 esp32:
   variant: esp32s3
   flash_size: 8MB
   framework:
-    type: esp-idf
-    sdkconfig_options:
-      CONFIG_FLASH_SIZE: "8388608"
-      CONFIG_PARTITION_TABLE_CUSTOM: "y"
+    type: arduino
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: VERBOSE
+  hardware_uart: USB_SERIAL_JTAG
 
 wifi:
   ssid: "SC"
   password: "8447Ce8086"
-  manual_ip:
-    static_ip: 192.168.1.222
-    gateway: 192.168.1.1
-    subnet: 255.255.255.0
-  ap:
 
 api:
   encryption:
@@ -37,60 +31,83 @@ api:
 ota:
   - platform: esphome
 
-logger:
-  level: INFO
+i2c:
+  - id: bsp_i2c
+    sda: GPIO4
+    scl: GPIO5
+    scan: true
+    frequency: 100kHz
 
-spi:
-  clk_pin: GPIO40
-  mosi_pin: GPIO39
+i2s_audio:
+  i2s_lrclk_pin: GPIO15
+  i2s_bclk_pin: GPIO17
+  i2s_mclk_pin: GPIO18
 
-time:
-  - platform: homeassistant
-    id: esptime
+microphone:
+  - platform: i2s_audio
+    id: sticks3_mic
+    adc_type: external
+    i2s_din_pin: GPIO16
+    pdm: false
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: stereo
+    use_apll: false
 
-output:
-  - platform: gpio
-    pin: GPIO38
-    id: bl_pin
+speaker:
+  - platform: i2s_audio
+    id: sticks3_spk
+    dac_type: external
+    i2s_dout_pin: GPIO14
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: mono
+    use_apll: false
 
-# ── Display (ST7789P3, 135x240) ──
-display:
-  - platform: st7789v
-    model: TTGO TDisplay 135x240
-    cs_pin: GPIO41
-    dc_pin: GPIO45
-    reset_pin: GPIO21
-    rotation: 90°
-    update_interval: 10s
-    id: sticks3_display
-    pages:
-      - id: page_minimal
-        lambda: |-
-          it.fill(Color(5, 5, 15));
-          it.strftime(0, 0, id(font_md), Color::WHITE, TextAlign::TOP_LEFT, "%H:%M", id(esptime).now());
-          it.printf(0, 30, id(font_sm), Color(100, 200, 255), "StickS3 MINIMAL");
-          it.printf(0, 50, id(font_sm), Color(80, 80, 80), "OK no audio");
-
-font:
-  - file: "gfonts://Figtree"
-    id: font_md
-    size: 20
-    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
-  - file: "gfonts://Figtree"
-    id: font_sm
-    size: 12
-    glyphs: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%"
+voice_assistant:
+  microphone: sticks3_mic
+  volume_multiplier: 2.0
+  on_client_connected:
+    then:
+      - lambda: |-
+          ESP_LOGI("va", "HA voice client CONNECTED");
+  on_client_disconnected:
+    then:
+      - lambda: |-
+          ESP_LOGW("va", "HA voice client DISCONNECTED");
+  on_error:
+    then:
+      - lambda: |-
+          ESP_LOGE("va", "Voice error: code=%d msg=%s", code, message.c_str());
+  on_listening:
+    then:
+      - lambda: |-
+          ESP_LOGI("va", "=== LISTENING ===");
+  on_tts_start:
+    then:
+      - lambda: |-
+          ESP_LOGI("va", "=== SPEAKING ===");
+  on_stt_end:
+    then:
+      - lambda: |-
+          ESP_LOGI("va", "=== STT DONE ===");
+  on_end:
+    then:
+      - lambda: |-
+          ESP_LOGI("va", "=== VA END ===");
 
 binary_sensor:
   - platform: gpio
-    name: "Button KEY1"
+    name: "KEY1 Voice Trigger"
     pin:
       number: GPIO11
-      mode: INPUT_PULLUP
+      mode:
+        input: true
+        pullup: true
       inverted: true
-  - platform: gpio
-    name: "Button KEY2"
-    pin:
-      number: GPIO12
-      mode: INPUT_PULLUP
-      inverted: true
+    id: key1
+    on_press:
+      - voice_assistant.start:
+          wake_word: "false"
+    on_release:
+      - voice_assistant.stop:
