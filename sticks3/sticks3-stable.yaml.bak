@@ -5,8 +5,6 @@ substitutions:
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
-  includes:
-    - udp_audio_stream.h
   platformio_options:
     build_flags:
       - "-DCONFIG_ESP_SYSTEM_PANIC_PRINT_BACKTRACE=1"
@@ -71,11 +69,6 @@ esphome:
         # light.turn_on removed to avoid GPIO conflict
         - delay: 100ms
         - component.update: sticks3_display
-    - priority: 100
-      then:
-        - delay: 500ms
-        - lambda: |-
-            udp_stream_init("192.168.1.145", 15001);
 
 esp32:
   variant: esp32s3
@@ -181,10 +174,6 @@ globals:
     type: std::string
     restore_value: false
     initial_value: '"192.168.1.222"'
-  - id: udp_streaming_active
-    type: bool
-    restore_value: false
-    initial_value: "false"
 
 # ── Text entities (pushable from HA) ──
 text:
@@ -305,23 +294,6 @@ i2s_audio:
   i2s_bclk_pin: GPIO17
   i2s_mclk_pin: GPIO18
 
-# ── Audio streaming (external C++ helper: udp_audio_stream.h) ──
-script:
-  - id: audiostream_send
-    then:
-      - lambda: |-
-          ESP_LOGI("udp", "Starting UDP audio stream → 192.168.1.145:15001");
-          udp_stream_start();
-      - while:
-          condition:
-            lambda: 'return id(udp_streaming_active);'
-          then:
-            - lambda: 'udp_stream_loop();'
-            - delay: 10ms
-      - lambda: |-
-          udp_stream_stop();
-          ESP_LOGI("udp", "UDP audio stream stopped");
-
 microphone:
   - platform: i2s_audio
     id: sticks3_mic
@@ -344,17 +316,41 @@ speaker:
     use_apll: true
 
 # ── Voice Assistant (local pipeline) ──
-# DISABLED — causes crash on start (all ESPHome versions)
-# voice_assistant:
-#   microphone: sticks3_mic
-#   volume_multiplier: 2.0
-#   on_client_connected: ...
-#   on_client_disconnected: ...
-#   on_error: ...
-#   on_listening: ...
-#   on_tts_start: ...
-#   on_stt_end: ...
-#   on_end: ...
+voice_assistant:
+  microphone: sticks3_mic
+  volume_multiplier: 2.0
+  on_client_connected:
+    then:
+      - lambda: |-
+          ESP_LOGI("va", "HA voice client CONNECTED");
+  on_client_disconnected:
+    then:
+      - lambda: |-
+          ESP_LOGW("va", "HA voice client DISCONNECTED");
+  on_error:
+    then:
+      - lambda: |-
+          ESP_LOGE("va", "Voice error: code=%d msg=%s", code, message.c_str());
+  on_listening:
+    then:
+      - lambda: |-
+          id(voice_state) = "Listening";
+          ESP_LOGI("va", "=== LISTENING ===");
+  on_tts_start:
+    then:
+      - lambda: |-
+          id(voice_state) = "Responding";
+          ESP_LOGI("va", "=== SPEAKING ===");
+  on_stt_end:
+    then:
+      - lambda: |-
+          id(voice_state) = "STT Done";
+          ESP_LOGI("va", "=== STT DONE ===");
+  on_end:
+    then:
+      - lambda: |-
+          id(voice_state) = "Idle";
+          ESP_LOGI("va", "=== VA END ===");
 
 # ── Buttons ──
 binary_sensor:
@@ -369,21 +365,21 @@ binary_sensor:
     id: key1
     on_press:
       - lambda: |-
-          ESP_LOGI("key", "KEY1 PRESSED → start UDP stream");
-          id(udp_streaming_active) = true;
+          ESP_LOGI("key", "KEY1 PRESSED");
           id(voice_state) = "Listening";
-          id(display_line1) = "🎤 Streaming...";
+          id(display_line1) = "🎤 Listening...";
           id(display_line2) = "Release=stop";
       - component.update: sticks3_display
-      - script.execute: audiostream_send
+      - voice_assistant.start:
+          wake_word: "false"
     on_release:
       - lambda: |-
-          ESP_LOGI("key", "KEY1 RELEASED → stop UDP stream");
-          id(udp_streaming_active) = false;
+          ESP_LOGI("key", "KEY1 RELEASED");
           id(voice_state) = "Idle";
           id(display_line1) = "StickS3 Ready";
           id(display_line2) = "KEY1=Talk";
       - component.update: sticks3_display
+      - voice_assistant.stop:
 
   - platform: gpio
     name: "KEY2"
@@ -396,17 +392,18 @@ binary_sensor:
     id: key2
     on_press:
       - lambda: |-
-          ESP_LOGI("key", "KEY2 PRESSED → start UDP stream");
-          id(udp_streaming_active) = true;
+          ESP_LOGI("key", "KEY2 PRESSED");
           id(voice_state) = "Listening";
-          id(display_line1) = "🎤 Streaming...";
+          id(display_line1) = "🎤 Listening...";
           id(display_line2) = "Press=stop";
       - component.update: sticks3_display
-      - script.execute: audiostream_send
+      - voice_assistant.start:
+          wake_word: "false"
     on_release:
       - lambda: |-
-          ESP_LOGI("key", "KEY2 RELEASED → stop UDP stream");
-          id(udp_streaming_active) = false;
+          ESP_LOGI("key", "KEY2 RELEASED");
+      - voice_assistant.stop:
+      - lambda: |-
           id(voice_state) = "Idle";
           id(display_line1) = "StickS3 Ready";
           id(display_line2) = "KEY1=Talk";
