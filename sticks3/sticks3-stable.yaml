@@ -65,9 +65,8 @@ esphome:
     - priority: 200
       then:
         - delay: 200ms
-        - light.turn_on:
-            id: sticks3_backlight
-            brightness: 50%
+        # Backlight now controlled via st7789v backlight_pin (GPIO38) - no manual control needed
+        # light.turn_on removed to avoid GPIO conflict
         - delay: 100ms
         - component.update: sticks3_display
 
@@ -125,20 +124,8 @@ time:
         then:
           - component.update: sticks3_display
 
-# ── Backlight PWM (50% brightness) ──
-output:
-  - platform: ledc
-    pin: GPIO38
-    id: bl_pwm
-    frequency: 1000Hz
-
-light:
-  - platform: monochromatic
-    name: "StickS3 Backlight"
-    id: sticks3_backlight
-    output: bl_pwm
-    restore_mode: ALWAYS_ON
-    default_transition_length: 0s
+# Backlight controlled via st7789v backlight_pin (GPIO38)
+# Removed LEDC PWM light to avoid GPIO conflict
 
 # ── Sensors ──
 sensor:
@@ -228,6 +215,7 @@ display:
     cs_pin: GPIO41
     dc_pin: GPIO45
     reset_pin: GPIO21
+    backlight_pin: GPIO38
     rotation: 0°
     update_interval: 1s
     id: sticks3_display
