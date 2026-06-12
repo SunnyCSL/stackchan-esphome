@@ -103,7 +103,6 @@ ota:
 
 logger:
   level: DEBUG
-  hardware_uart: USB_SERIAL_JTAG
   logs:
     text_sensor: WARN
 
