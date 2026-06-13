@@ -12,58 +12,80 @@ esphome:
       - "-DCONFIG_ESP_SYSTEM_PANIC_PRINT_BACKTRACE=1"
       - "-DCONFIG_FREERTOS_CHECK_STACKOVERFLOW=3"
   on_boot:
-    - priority: 500
+    - priority: 700
+      then:
+        - delay: 800ms  # Warmup: let M5PM1 stabilize before I2C access
+    - priority: 600
       then:
         - lambda: |-
-            // M5PM1 @ 0x6E: full init matching M5Unified Power_Class
+            // M5PM1 @ 0x6E: full init with retry logic
             uint8_t cmd[2];
             uint8_t buf[2];
 
-            // I2C wake: write reg addr then read
-            cmd[0] = 0x00;
-            id(bsp_i2c).write(0x6E, cmd, 1);
-            delay(10);
-            id(bsp_i2c).read(0x6E, buf, 1);
-
-            // 1. Disable I2C idle sleep (reg 0x09 = 0x00)
-            cmd[0] = 0x09; cmd[1] = 0x00;
-            id(bsp_i2c).write(0x6E, cmd, 2);
-            delay(10);
-
-            // 2. Disable watchdog (reg 0x0A = 0x00)
-            cmd[0] = 0x0A; cmd[1] = 0x00;
-            id(bsp_i2c).write(0x6E, cmd, 2);
-            delay(10);
-
-            // 3. PWR_CFG: all rails on (reg 0x06 = 0x1F)
-            cmd[0] = 0x06; cmd[1] = 0x1F;
-            id(bsp_i2c).write(0x6E, cmd, 2);
-            delay(10);
-
-            // 4. GPIO_FUNC0: PYG2 = GPIO function
-            cmd[0] = 0x16;
-            id(bsp_i2c).write(0x6E, cmd, 1);
-            if (id(bsp_i2c).read(0x6E, buf, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
-              buf[0] &= ~0x04;
-              cmd[0] = 0x16; cmd[1] = buf[0];
-              id(bsp_i2c).write(0x6E, cmd, 2);
+            // Retry I2C up to 5 times on cold boot
+            bool pmu_ok = false;
+            for (int retry = 0; retry < 5; retry++) {
+              cmd[0] = 0x00;
+              auto w = id(bsp_i2c).write(0x6E, cmd, 1);
+              delay(5);
+              auto r = id(bsp_i2c).read(0x6E, buf, 1);
+              if (w == esphome::i2c::ERROR_OK && r == esphome::i2c::ERROR_OK) {
+                pmu_ok = true;
+                break;
+              }
+              ESP_LOGW("pmu", "M5PM1 I2C retry %d: w=%d r=%d", retry+1, (int)w, (int)r);
+              delay(50);
             }
-            delay(10);
 
-            // 5. GPIO_MODE: PYG2 output (reg 0x10 bit2 = 1)
-            cmd[0] = 0x10; cmd[1] = 0x04;
-            id(bsp_i2c).write(0x6E, cmd, 2);
-            delay(10);
+            if (!pmu_ok) {
+              ESP_LOGE("pmu", "M5PM1 I2C FAILED after 5 retries — display may be dark");
+            } else {
+              ESP_LOGI("pmu", "M5PM1 I2C OK, configuring power rails");
 
-            // 6. GPIO_DRV: push-pull (reg 0x13 = 0x00)
-            cmd[0] = 0x13; cmd[1] = 0x00;
-            id(bsp_i2c).write(0x6E, cmd, 2);
-            delay(10);
+              // 1. Disable I2C idle sleep (reg 0x09 = 0x00)
+              cmd[0] = 0x09; cmd[1] = 0x00;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+              delay(10);
 
-            // 7. GPIO_OUT: PYG2 HIGH → L3B ON (reg 0x11 bit2 = 1)
-            cmd[0] = 0x11; cmd[1] = 0x04;
-            id(bsp_i2c).write(0x6E, cmd, 2);
-            delay(100);
+              // 2. Disable watchdog (reg 0x0A = 0x00)
+              cmd[0] = 0x0A; cmd[1] = 0x00;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+              delay(10);
+
+              // 3. PWR_CFG: all rails on (reg 0x06 = 0x1F)
+              cmd[0] = 0x06; cmd[1] = 0x1F;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+              delay(10);
+
+              // 4. GPIO_FUNC0: PYG2 = GPIO function (clear bit2)
+              cmd[0] = 0x16;
+              id(bsp_i2c).write(0x6E, cmd, 1);
+              if (id(bsp_i2c).read(0x6E, buf, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
+                buf[0] &= ~0x04;
+                cmd[0] = 0x16; cmd[1] = buf[0];
+                id(bsp_i2c).write(0x6E, cmd, 2);
+              }
+              delay(10);
+
+              // 5. GPIO_MODE: PYG2 output (reg 0x10 bit2 = 1)
+              cmd[0] = 0x10; cmd[1] = 0x04;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+              delay(10);
+
+              // 6. GPIO_DRV: push-pull (reg 0x13 = 0x00)
+              cmd[0] = 0x13; cmd[1] = 0x00;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+              delay(10);
+
+              // 7. GPIO_OUT: PYG2 HIGH → L3B ON (reg 0x11 bit2 = 1)
+              cmd[0] = 0x11; cmd[1] = 0x04;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+              delay(100);
+            }
+            // Force backlight HIGH via GPIO38 after PMU rails are up
+            pinMode(38, OUTPUT);
+            digitalWrite(38, HIGH);
+            ESP_LOGI("pmu", "Backlight GPIO38 forced HIGH");
     - priority: 200
       then:
         - delay: 200ms
