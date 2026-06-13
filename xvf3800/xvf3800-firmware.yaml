@@ -12,7 +12,7 @@ esphome:
           // Set VNR to Low (1) for wall-echo compensation
           uint8_t buf[] = {241, 0x00, 2, 1};
           id(respeaker)->write(buf, sizeof(buf));
-          ESP_LOGI("xvf3800", "VNR set to Low (1)");
+      - voice_assistant.start_continuous:
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -20,10 +20,6 @@ esp32:
   flash_size: 8MB
   framework:
     type: esp-idf
-    sdkconfig_options:
-      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_MHZ: "240"
-      CONFIG_SPIRAM_RODATA: "y"
-      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
 
 psram:
   mode: octal
@@ -48,7 +44,7 @@ ota:
 logger:
   level: INFO
 
-# ── I2C bus (to XVF3800 @ 0x2C + AIC3104) ──
+# ── I2C bus (to XVF3800 @ 0x2C) ──
 i2c:
   - id: internal_i2c
     sda: GPIO5
@@ -61,7 +57,7 @@ time:
   - platform: homeassistant
     id: esptime
 
-# ── I2S mic bus (XVF3800 is master, ESP32 is secondary) ──
+# ── I2S mic bus (XVF3800 is master at 48kHz) ──
 i2s_audio:
   - id: i2s_input
     i2s_lrclk_pin: GPIO7
@@ -74,11 +70,11 @@ microphone:
     i2s_din_pin: GPIO43
     adc_type: external
     pdm: false
-    sample_rate: 48000
+    sample_rate: 16000
     bits_per_sample: 32bit
-    i2s_mode: secondary
+    i2s_mode: secondary         # XMOS is master
     i2s_audio_id: i2s_input
-    channel: left
+    channel: left               # Left channel only (mono)
 
 # ── External components ──
 external_components:
@@ -104,31 +100,36 @@ respeaker_xvf3800:
   led_beam_sensor:
     name: "Voice Beam Direction"
     id: beam_direction
-    update_interval: 100ms
+    update_interval: 200ms
     internal: true
   firmware:
     url: https://github.com/formatBCE/Respeaker-XVF3800-ESPHome-integration/raw/refs/heads/main/application_xvf3800_inthost-lr48-sqr-i2c-v1.0.7-release.bin
     version: "1.0.7"
     md5: 043a848f544ff2c7265ac19685daf5de
 
-# ── Voice Assistant (VAD mode — no wake word needed) ──
+# ── Voice Assistant (always-on, VAD-gated) ──
 voice_assistant:
   id: va
-  microphone: i2s_mics
-  noise_suppression_level: 2
+  microphone:
+    microphone: i2s_mics
+    channels: 0
   use_wake_word: false
-  on_start:
-    - logger.log: "Voice started"
+  noise_suppression_level: 2
+  on_listening:
+    - lambda: |-
+        // Voice detected — light up center LED blue
+        uint32_t colors[12];
+        for (int i = 0; i < 12; i++) colors[i] = 0x00AA00FF;
+        id(respeaker).set_led_ring(colors);
+    - logger.log: "Voice detected (VAD)"
+  on_stt_end:
+    - logger.log: "STT complete"
   on_end:
     - logger.log: "Voice ended"
-  on_stt_end:
-    - logger.log: "STT done"
   on_error:
     - logger.log: "Voice error"
-
-# ── LED DOA Visualization ──
 interval:
-  - interval: 100ms
+  - interval: 200ms
     then:
       lambda: |
         static uint32_t colors[12];
@@ -136,24 +137,24 @@ interval:
         static uint32_t last_update = 0;
         static int smoothed = -2;
         static int count = 0;
-        
+
         int direction = (int)id(beam_direction).get_state();
         uint32_t now = millis();
-        
-        // Smooth DOA
+
+        // Smooth DOA: require 3 consecutive same direction
         if (direction >= 0 && direction <= 11) {
           if (direction == smoothed) { count++; }
           else { count = 1; smoothed = direction; }
         }
         if (count < 3) direction = last_direction;
-        
+
         if (direction >= 0 && direction <= 11 && direction != last_direction) {
           last_direction = direction;
           last_update = now;
-          
+
           float bri = id(led_brightness).state;
           uint8_t b = (uint8_t)(255.0f * bri);
-          
+
           for (int i = 0; i < 12; i++) {
             int dist = abs(i - direction);
             if (dist > 6) dist = 12 - dist;
@@ -169,7 +170,7 @@ interval:
           }
           id(respeaker).set_led_ring(colors);
         }
-        
+
         // Fade out after 3s silence
         if (last_direction >= 0 && now - last_update > 3000) {
           float fade = 1.0f - (now - last_update - 3000) / 2000.0f;
