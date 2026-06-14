@@ -44,9 +44,6 @@ api:
 ota:
   - platform: esphome
 
-http_request:
-  id: http_client
-
 logger:
   level: DEBUG
 
@@ -150,23 +147,17 @@ micro_wake_word:
   vad:
     probability_cutoff: 0.05
   models:
-    - model: https://github.com/kahrendt/microWakeWord/releases/download/okay_nabu_20241226.3/okay_nabu.json
+    - model: okay_nabu
       id: okay_nabu
-      probability_cutoff: 0.10
+      probability_cutoff: 0.50
     - model: hey_jarvis
       id: hey_jarvis
-      probability_cutoff: 0.97
+      probability_cutoff: 0.70
     - model: hey_mycroft
       id: hey_mycroft
-      probability_cutoff: 0.95
   on_wake_word_detected:
     - logger.log: "Wake word detected!"
-    - http_request.post:
-        url: http://192.168.1.145:5050/wake-word
-        json:
-          wake_word: "{{this.name}}"
-          device: xvf3800-voice
-    - voice_assistant.start:
+    - logger.log: "Event: OK"
 
 # ── Voice Assistant ──
 voice_assistant:
