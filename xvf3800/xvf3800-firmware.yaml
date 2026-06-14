@@ -9,7 +9,6 @@ esphome:
   on_boot:
     then:
       - lambda: |
-          // Set VNR to Low (1) for wall-echo compensation
           uint8_t buf[] = {241, 0x00, 2, 1};
           id(respeaker)->write(buf, sizeof(buf));
           ESP_LOGI("xvf3800", "VNR set to Low (1)");
@@ -49,9 +48,8 @@ ota:
   - platform: esphome
 
 logger:
-  level: INFO
+  level: DEBUG
 
-# ── I2C bus (to XVF3800 @ 0x2C + AIC3104) ──
 i2c:
   - id: internal_i2c
     sda: GPIO5
@@ -59,42 +57,30 @@ i2c:
     scan: true
     frequency: 100kHz
 
-# ── Time ──
 time:
   - platform: homeassistant
     id: esptime
 
-# ── I2S Audio buses (XVF3800 is master, ESP32 secondary) ──
-# Single bus: XVF3800 shares LRCLK/BCLK for both mic & speaker
+# ── I2S Audio bus ──
 i2s_audio:
   - id: i2s_bus
     i2s_lrclk_pin: GPIO7
     i2s_bclk_pin: GPIO8
 
-# ── Microphone (from XVF3800 via I2S) ──
+# ── Microphone ──
 microphone:
   - platform: i2s_audio
     id: i2s_mics
     i2s_din_pin: GPIO43
     adc_type: external
     pdm: false
-    sample_rate: 48000          # XMOS outputs 48kHz; formatBCE reports 16kHz for validation
+    sample_rate: 48000
     bits_per_sample: 32bit
     i2s_mode: secondary
     i2s_audio_id: i2s_bus
-    channel: left
 
-# ── External components ──
+# ── External components (only formatBCE for XVF3800, built-in everything else) ──
 external_components:
-  - source:
-      type: git
-      url: https://github.com/formatBCE/esphome
-      ref: respeaker_microphone
-    components:
-      - i2s_audio
-      - voice_assistant
-      - micro_wake_word
-    refresh: 0s
   - source:
       type: git
       url: https://github.com/formatBCE/Respeaker-XVF3800-ESPHome-integration
@@ -132,21 +118,30 @@ micro_wake_word:
     microphone: i2s_mics
     channels: 0
   models:
-    - model: hey_jarvis
-      id: hey_jarvis
+    - model: okay_nabu
+      id: okay_nabu
+      probability_cutoff: 0.90
   on_wake_word_detected:
-    - logger.log: "Wake word detected! Starting voice..."
-    - voice_assistant.start:
-        wake_word: !lambda return wake_word;
+    - logger.log: "Wake word detected!"
+
 # ── Voice Assistant ──
 voice_assistant:
   id: va
+  microphone: i2s_mics
   micro_wake_word: mww
-  microphone:
-    microphone: i2s_mics
-    channels: 0
-  use_wake_word: false
-  noise_suppression_level: 2
+  use_wake_word: true
+  noise_suppression_level: 1
+  volume_multiplier: 2.0
+  on_client_connected:
+    - logger.log: "HA client connected - voice assistant ready"
+  on_start:
+    - logger.log: "Voice started!"
+  on_listening:
+    - logger.log: "Listening..."
+  on_tts_start:
+    - logger.log: "TTS started"
+  on_end:
+    - logger.log: "Voice ended"
 
 # ── LED Ring DOA Visualization ──
 interval:
@@ -156,10 +151,10 @@ interval:
         static uint32_t colors[12];
         static int last_direction = -2;
         static uint32_t last_update = 0;
-        
+
         int direction = (int)id(beam_direction).get_state();
         uint32_t now = millis();
-        
+
         static int smoothed_direction = -2;
         static int direction_count = 0;
         if (direction >= 0 && direction <= 11) {
@@ -171,18 +166,18 @@ interval:
           }
         }
         if (direction_count < 3) direction = last_direction;
-        
+
         if (direction >= 0 && direction <= 11 && direction != last_direction) {
           last_direction = direction;
           last_update = now;
-          
+
           float brightness = id(led_brightness).state;
           uint8_t b = (uint8_t)(255.0f * brightness);
-          
+
           for (int i = 0; i < 12; i++) {
             int dist = abs(i - direction);
             if (dist > 6) dist = 12 - dist;
-            
+
             uint8_t level = 0;
             switch (dist) {
               case 0: level = b; break;
@@ -194,18 +189,18 @@ interval:
           }
           id(respeaker).set_led_ring(colors);
         }
-        
+
         if (last_direction >= 0 && now - last_update > 3000) {
           float fade = 1.0f - (now - last_update - 3000) / 2000.0f;
           if (fade < 0) fade = 0;
-          
+
           float brightness = id(led_brightness).state;
           uint8_t b = (uint8_t)(255.0f * brightness * fade);
-          
+
           for (int i = 0; i < 12; i++) {
             int dist = abs(i - last_direction);
             if (dist > 6) dist = 12 - dist;
-            
+
             uint8_t level = 0;
             switch (dist) {
               case 0: level = b * 0.4f; break;
@@ -218,7 +213,7 @@ interval:
           if (fade == 0) last_direction = -2;
         }
 
-# ── LED Brightness Control ──
+# ── LED Brightness ──
 number:
   - platform: template
     id: led_brightness
