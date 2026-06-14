@@ -6,12 +6,6 @@ esphome:
   name: ${name}
   friendly_name: ${friendly_name}
   min_version: 2026.5.0
-  on_boot:
-    then:
-      - lambda: |
-          uint8_t buf[] = {241, 0x00, 2, 1};
-          id(respeaker)->write(buf, sizeof(buf));
-          ESP_LOGI("xvf3800", "VNR set to Low (1)");
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -36,16 +30,22 @@ wifi:
   password: "8447Ce8086"
   power_save_mode: none
   manual_ip:
-    static_ip: 192.168.1.200
+    static_ip: 192.168.1.223
     gateway: 192.168.1.1
     subnet: 255.255.255.0
 
 api:
   encryption:
     key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+  on_client_connected:
+    - micro_wake_word.start:
+    - logger.log: "WW started via api.on_client_connected"
 
 ota:
   - platform: esphome
+
+http_request:
+  id: http_client
 
 logger:
   level: DEBUG
@@ -61,7 +61,7 @@ time:
   - platform: homeassistant
     id: esptime
 
-# ── I2S Audio bus ──
+# ── I2S Audio ──
 i2s_audio:
   - id: i2s_bus
     i2s_lrclk_pin: GPIO7
@@ -78,22 +78,45 @@ microphone:
     bits_per_sample: 32bit
     i2s_mode: secondary
     i2s_audio_id: i2s_bus
+    channel: stereo
 
-# ── External components (only formatBCE for XVF3800, built-in everything else) ──
+# ── Speaker ──
+speaker:
+  - platform: i2s_audio
+    id: i2s_spk
+    i2s_dout_pin: GPIO44
+    sample_rate: 48000
+    bits_per_sample: 32bit
+    i2s_mode: secondary
+    i2s_audio_id: i2s_bus
+    dac_type: external
+    channel: stereo
+    audio_dac: aic3104_dac
+
+# ── External components ──
 external_components:
   - source:
       type: git
-      url: https://github.com/formatBCE/Respeaker-XVF3800-ESPHome-integration
-      ref: main
+      url: https://github.com/formatBCE/esphome
+      ref: respeaker_microphone
+    components:
+      - i2s_audio
+      - micro_wake_word
+      - voice_assistant
+    refresh: 0s
+  - source:
+      type: local
+      path: /home/radxa/stackchan-esphome/xvf3800-integration/esphome/components
     components:
       - respeaker_xvf3800
       - aic3104
     refresh: 0s
 
-# ── XVF3800 Voice Processor ──
+# ── XVF3800 ──
 respeaker_xvf3800:
   id: respeaker
   address: 0x2C
+  i2c_id: internal_i2c
   mute_switch:
     id: mic_mute_switch
     name: "Microphone Mute"
@@ -111,43 +134,71 @@ respeaker_xvf3800:
     version: "1.0.7"
     md5: 043a848f544ff2c7265ac19685daf5de
 
-# ── Wake Word Detection ──
+# ── AIC3104 ──
+audio_dac:
+  - platform: aic3104
+    id: aic3104_dac
+    i2c_id: internal_i2c
+
+# ── Wake Word ──
 micro_wake_word:
   id: mww
   microphone:
     microphone: i2s_mics
-    channels: 0
+    channels: 1
+  stop_after_detection: false
+  vad:
+    probability_cutoff: 0.05
   models:
-    - model: okay_nabu
+    - model: https://github.com/kahrendt/microWakeWord/releases/download/okay_nabu_20241226.3/okay_nabu.json
       id: okay_nabu
-      probability_cutoff: 0.90
+      probability_cutoff: 0.10
+    - model: hey_jarvis
+      id: hey_jarvis
+      probability_cutoff: 0.97
+    - model: hey_mycroft
+      id: hey_mycroft
+      probability_cutoff: 0.95
   on_wake_word_detected:
     - logger.log: "Wake word detected!"
+    - http_request.post:
+        url: http://192.168.1.145:5050/wake-word
+        json:
+          wake_word: "{{this.name}}"
+          device: xvf3800-voice
+    - voice_assistant.start:
 
 # ── Voice Assistant ──
 voice_assistant:
   id: va
-  microphone: i2s_mics
+  microphone:
+    microphone: i2s_mics
+    channels: 0
+  speaker: i2s_spk
   micro_wake_word: mww
-  use_wake_word: true
-  noise_suppression_level: 1
-  volume_multiplier: 2.0
+  use_wake_word: false
+  noise_suppression_level: 0
+  volume_multiplier: 1.0
   on_client_connected:
-    - logger.log: "HA client connected - voice assistant ready"
-  on_start:
-    - logger.log: "Voice started!"
-  on_listening:
-    - logger.log: "Listening..."
-  on_tts_start:
-    - logger.log: "TTS started"
-  on_end:
-    - logger.log: "Voice ended"
+    - micro_wake_word.start:
+    - logger.log: "WW started (HA connected)"
 
-# ── LED Ring DOA Visualization ──
+# ── LED Ring DOA ──
 interval:
+  - interval: 3s
+    id: boot_delay
+    then:
+      - if:
+          condition:
+            - micro_wake_word.is_running:
+          then:
+            - logger.log: "WW already running (no action)"
+          else:
+            - micro_wake_word.start:
+            - logger.log: "WW start (boot interval fallback)"
   - interval: 100ms
     then:
-      lambda: |
+      lambda: |-
         static uint32_t colors[12];
         static int last_direction = -2;
         static uint32_t last_update = 0;
@@ -177,7 +228,6 @@ interval:
           for (int i = 0; i < 12; i++) {
             int dist = abs(i - direction);
             if (dist > 6) dist = 12 - dist;
-
             uint8_t level = 0;
             switch (dist) {
               case 0: level = b; break;
@@ -193,14 +243,11 @@ interval:
         if (last_direction >= 0 && now - last_update > 3000) {
           float fade = 1.0f - (now - last_update - 3000) / 2000.0f;
           if (fade < 0) fade = 0;
-
           float brightness = id(led_brightness).state;
           uint8_t b = (uint8_t)(255.0f * brightness * fade);
-
           for (int i = 0; i < 12; i++) {
             int dist = abs(i - last_direction);
             if (dist > 6) dist = 12 - dist;
-
             uint8_t level = 0;
             switch (dist) {
               case 0: level = b * 0.4f; break;
