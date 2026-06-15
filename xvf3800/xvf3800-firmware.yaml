@@ -63,9 +63,20 @@ time:
 
 # ── I2S Audio ──
 i2s_audio:
-  - id: i2s_bus
-    i2s_lrclk_pin: GPIO7
-    i2s_bclk_pin: GPIO8
+  - id: i2s_output
+    i2s_lrclk_pin:
+      number: GPIO7
+      allow_other_uses: true
+    i2s_bclk_pin:
+      number: GPIO8
+      allow_other_uses: true
+  - id: i2s_input
+    i2s_lrclk_pin:
+      number: GPIO7
+      allow_other_uses: true
+    i2s_bclk_pin:
+      number: GPIO8
+      allow_other_uses: true
 
 # ── Microphone ──
 microphone:
@@ -77,7 +88,7 @@ microphone:
     sample_rate: 48000
     bits_per_sample: 32bit
     i2s_mode: secondary
-    i2s_audio_id: i2s_bus
+    i2s_audio_id: i2s_input
     channel: stereo
 
 # ── Speaker ──
@@ -88,7 +99,7 @@ speaker:
     sample_rate: 48000
     bits_per_sample: 32bit
     i2s_mode: secondary
-    i2s_audio_id: i2s_bus
+    i2s_audio_id: i2s_output
     dac_type: external
     channel: stereo
     audio_dac: aic3104_dac
@@ -120,15 +131,9 @@ respeaker_xvf3800:
   mute_switch:
     id: mic_mute_switch
     name: "Microphone Mute"
-    update_interval: 1s
   dfu_version:
     name: "Firmware Version"
-    update_interval: 120s
-  led_beam_sensor:
-    name: "Voice Beam Direction"
-    id: beam_direction
-    update_interval: 100ms
-    internal: false
+    update_interval: 0s
   firmware:
     url: https://github.com/formatBCE/Respeaker-XVF3800-ESPHome-integration/raw/refs/heads/main/application_xvf3800_inthost-lr48-sqr-i2c-v1.0.7-release.bin
     version: "1.0.7"
@@ -166,13 +171,16 @@ micro_wake_word:
         json:
           wake_word: "{{this.name}}"
           device: xvf3800-voice
+    - delay: 200ms
     - voice_assistant.start:
-    - logger.log: "Event: OK"
+    - logger.log: "Event: VA start OK"
 
 # ── Voice Assistant ──
 voice_assistant:
   id: va
-  microphone: i2s_mics
+  microphone:
+    microphone: i2s_mics
+    channels: 0
   speaker: i2s_spk
   micro_wake_word: mww
   use_wake_word: false
@@ -190,93 +198,4 @@ voice_assistant:
     - micro_wake_word.start:
     - logger.log: "WW started (HA connected)"
 
-# ── LED Ring DOA ──
-interval:
-  - interval: 3s
-    id: boot_delay
-    then:
-      - if:
-          condition:
-            - micro_wake_word.is_running:
-          then:
-            - logger.log: "WW already running (no action)"
-          else:
-            - micro_wake_word.start:
-            - logger.log: "WW start (boot interval fallback)"
-  - interval: 100ms
-    then:
-      lambda: |-
-        static uint32_t colors[12];
-        static int last_direction = -2;
-        static uint32_t last_update = 0;
-
-        int direction = (int)id(beam_direction).get_state();
-        uint32_t now = millis();
-
-        static int smoothed_direction = -2;
-        static int direction_count = 0;
-        if (direction >= 0 && direction <= 11) {
-          if (direction == smoothed_direction) {
-            direction_count++;
-          } else {
-            direction_count = 1;
-            smoothed_direction = direction;
-          }
-        }
-        if (direction_count < 3) direction = last_direction;
-
-        if (direction >= 0 && direction <= 11 && direction != last_direction) {
-          last_direction = direction;
-          last_update = now;
-
-          float brightness = id(led_brightness).state;
-          uint8_t b = (uint8_t)(255.0f * brightness);
-
-          for (int i = 0; i < 12; i++) {
-            int dist = abs(i - direction);
-            if (dist > 6) dist = 12 - dist;
-            uint8_t level = 0;
-            switch (dist) {
-              case 0: level = b; break;
-              case 1: level = b * 0.30f; break;
-              case 2: level = b * 0.10f; break;
-              default: level = 0; break;
-            }
-            colors[i] = ((uint32_t)level) | ((uint32_t)(level * 0.5f) << 8);
-          }
-          id(respeaker).set_led_ring(colors);
-        }
-
-        if (last_direction >= 0 && now - last_update > 3000) {
-          float fade = 1.0f - (now - last_update - 3000) / 2000.0f;
-          if (fade < 0) fade = 0;
-          float brightness = id(led_brightness).state;
-          uint8_t b = (uint8_t)(255.0f * brightness * fade);
-          for (int i = 0; i < 12; i++) {
-            int dist = abs(i - last_direction);
-            if (dist > 6) dist = 12 - dist;
-            uint8_t level = 0;
-            switch (dist) {
-              case 0: level = b * 0.4f; break;
-              case 1: level = b * 0.10f; break;
-              default: level = 0; break;
-            }
-            colors[i] = ((uint32_t)level) | ((uint32_t)(level * 0.4f) << 8);
-          }
-          id(respeaker).set_led_ring(colors);
-          if (fade == 0) last_direction = -2;
-        }
-
-# ── LED Brightness ──
-number:
-  - platform: template
-    id: led_brightness
-    name: "LED Brightness"
-    entity_category: config
-    optimistic: true
-    restore_value: true
-    min_value: 0.0
-    max_value: 1.0
-    step: 0.1
-    initial_value: 0.8
-    mode: slider
+# ── LED Ring 熄咗 (DOA polling conflict with voice_assistant) ──
