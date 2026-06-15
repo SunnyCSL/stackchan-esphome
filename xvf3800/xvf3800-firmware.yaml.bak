@@ -63,9 +63,20 @@ time:
 
 # ── I2S Audio ──
 i2s_audio:
-  - id: i2s_bus
-    i2s_lrclk_pin: GPIO7
-    i2s_bclk_pin: GPIO8
+  - id: i2s_output
+    i2s_lrclk_pin:
+      number: GPIO7
+      allow_other_uses: true
+    i2s_bclk_pin:
+      number: GPIO8
+      allow_other_uses: true
+  - id: i2s_input
+    i2s_lrclk_pin:
+      number: GPIO7
+      allow_other_uses: true
+    i2s_bclk_pin:
+      number: GPIO8
+      allow_other_uses: true
 
 # ── Microphone ──
 microphone:
@@ -74,10 +85,10 @@ microphone:
     i2s_din_pin: GPIO43
     adc_type: external
     pdm: false
-    sample_rate: 48000
-    bits_per_sample: 32bit
+    sample_rate: 16000
+    bits_per_sample: 16bit
     i2s_mode: secondary
-    i2s_audio_id: i2s_bus
+    i2s_audio_id: i2s_input
     channel: stereo
 
 # ── Speaker ──
@@ -88,7 +99,7 @@ speaker:
     sample_rate: 48000
     bits_per_sample: 32bit
     i2s_mode: secondary
-    i2s_audio_id: i2s_bus
+    i2s_audio_id: i2s_output
     dac_type: external
     channel: stereo
     audio_dac: aic3104_dac
@@ -150,7 +161,7 @@ micro_wake_word:
   vad:
     probability_cutoff: 0.05
   models:
-    - model: https://github.com/OHF-Voice/micro-wake-word/releases/download/okay_nabu_20241226.3/okay_nabu.json
+    - model: okay_nabu
       id: okay_nabu
       probability_cutoff: 0.10
     - model: hey_jarvis
@@ -158,34 +169,22 @@ micro_wake_word:
       probability_cutoff: 0.97
     - model: hey_mycroft
       id: hey_mycroft
-      probability_cutoff: 0.95
   on_wake_word_detected:
     - logger.log: "Wake word detected!"
-    - http_request.post:
-        url: http://192.168.1.145:5050/wake-word
-        json:
-          wake_word: "{{this.name}}"
-          device: xvf3800-voice
     - voice_assistant.start:
     - logger.log: "Event: OK"
 
 # ── Voice Assistant ──
 voice_assistant:
   id: va
-  microphone: i2s_mics
+  microphone:
+    microphone: i2s_mics
+    channels: 0
   speaker: i2s_spk
   micro_wake_word: mww
   use_wake_word: false
   noise_suppression_level: 0
   volume_multiplier: 1.0
-  on_listening:
-    - logger.log: "VA: Listening"
-  on_stt_end:
-    - logger.log: "VA: STT end"
-  on_tts_start:
-    - logger.log: "VA: TTS start"
-  on_end:
-    - logger.log: "VA: End"
   on_client_connected:
     - micro_wake_word.start:
     - logger.log: "WW started (HA connected)"
