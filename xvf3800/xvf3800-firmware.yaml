@@ -61,10 +61,7 @@ esphome:
   on_boot:
     priority: 800
     then:
-      - delay: 3s  # Wait for XMOS to boot before I2C init
-      - lambda: |-
-          gpio_set_pull_mode(GPIO_NUM_5, GPIO_PULLUP_ONLY);
-          gpio_set_pull_mode(GPIO_NUM_6, GPIO_PULLUP_ONLY);
+      - delay: 3s
 
 time:
   - platform: homeassistant
@@ -142,7 +139,7 @@ respeaker_xvf3800:
     name: "Microphone Mute"
   dfu_version:
     name: "Firmware Version"
-    update_interval: 0s
+    update_interval: 60s
   firmware:
     url: https://github.com/formatBCE/Respeaker-XVF3800-ESPHome-integration/raw/refs/heads/main/application_xvf3800_inthost-lr48-sqr-i2c-v1.0.7-release.bin
     version: "1.0.7"
@@ -166,7 +163,7 @@ micro_wake_word:
   models:
     - model: https://github.com/OHF-Voice/micro-wake-word/releases/download/okay_nabu_20241226.3/okay_nabu.json
       id: okay_nabu
-      probability_cutoff: 0.10
+      probability_cutoff: 0.05
     - model: hey_jarvis
       id: hey_jarvis
       probability_cutoff: 0.97
@@ -187,9 +184,7 @@ micro_wake_word:
 # ── Voice Assistant ──
 voice_assistant:
   id: va
-  microphone:
-    microphone: i2s_mics
-    channels: 0
+  microphone: i2s_mics
   speaker: i2s_spk
   micro_wake_word: mww
   use_wake_word: false
