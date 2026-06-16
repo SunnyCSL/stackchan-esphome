@@ -95,7 +95,7 @@ microphone:
     bits_per_sample: 32bit
     i2s_mode: secondary
     i2s_audio_id: i2s_input
-    channel: stereo
+    channel: left
 
 # ── Speaker ──
 speaker:
@@ -156,7 +156,7 @@ micro_wake_word:
   id: mww
   microphone:
     microphone: i2s_mics
-    channels: 1
+    channels: 0
   stop_after_detection: false
   vad:
     probability_cutoff: 0.05
