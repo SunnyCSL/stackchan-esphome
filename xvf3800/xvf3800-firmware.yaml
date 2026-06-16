@@ -2,11 +2,6 @@ substitutions:
   name: xvf3800-voice
   friendly_name: "XVF3800 Voice"
 
-esphome:
-  name: ${name}
-  friendly_name: ${friendly_name}
-  min_version: 2026.5.0
-
 esp32:
   board: esp32-s3-devkitc-1
   variant: esp32s3
@@ -56,6 +51,19 @@ i2c:
     scl: GPIO6
     scan: true
     frequency: 100kHz
+    sda_pullup_enabled: true
+    scl_pullup_enabled: true
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  min_version: 2026.5.0
+  on_boot:
+    priority: 800
+    then:
+      - lambda: |-
+          gpio_set_pull_mode(GPIO_NUM_5, GPIO_PULLUP_ONLY);
+          gpio_set_pull_mode(GPIO_NUM_6, GPIO_PULLUP_ONLY);
 
 time:
   - platform: homeassistant
