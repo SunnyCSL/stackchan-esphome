@@ -61,6 +61,7 @@ esphome:
   on_boot:
     priority: 800
     then:
+      - delay: 3s  # Wait for XMOS to boot before I2C init
       - lambda: |-
           gpio_set_pull_mode(GPIO_NUM_5, GPIO_PULLUP_ONLY);
           gpio_set_pull_mode(GPIO_NUM_6, GPIO_PULLUP_ONLY);
@@ -198,12 +199,20 @@ voice_assistant:
     - logger.log: "VA: Listening"
   on_stt_end:
     - logger.log: "VA: STT end"
+    - delay: 300ms  # Shared I2S bus: wait for mic to release before speaker
   on_tts_start:
     - logger.log: "VA: TTS start"
   on_end:
     - logger.log: "VA: End"
+    - delay: 2s  # Shared I2S bus: wait for TTS to finish before restarting WW
+    - micro_wake_word.start:
+    - logger.log: "WW restarted after VA end"
   on_client_connected:
     - micro_wake_word.start:
     - logger.log: "WW started (HA connected)"
+  on_error:
+    - logger.log: "VA: Error - restarting WW"
+    - delay: 2s
+    - micro_wake_word.start:
 
 # ── LED Ring 熄咗 (DOA polling conflict with voice_assistant) ──
