@@ -22,7 +22,7 @@ WYOMING_PORT = 10400
 HTTP_PORT = 5050
 MINIMAX_API_KEY=os.environ.get("STEP_API_KEY", "72Bou6NpuBsJzqcVEv2AAEzUMBLDoe1W8bfv4HQshZZKDd3tbjOkY4YO3MQ56jrOR")
 MINIMAX_MODEL = "gpt-4o-mini"  # Step uses OpenAI-compatible models
-TTS_VOICE = "zh-CN-XiaoxiaoNeural"
+TTS_VOICE = "zh-HK-HiuGaaiNeural"
 
 audio_buffer = bytearray()
 processing = False
@@ -115,7 +115,7 @@ async def handle_transcript(text: str, writer: asyncio.StreamWriter):
         # Convert to PCM 16kHz mono
         result = subprocess.run(
             ["ffmpeg", "-y", "-i", tts_file, "-ar", "16000", "-ac", "1",
-             "-f", "s16le", "-acodec", "pcm_s16le", "-"],
+             "-af", "volume=0.8", "-f", "s16le", "-acodec", "pcm_s16le", "-"],
             capture_output=True
         )
         pcm = result.stdout
