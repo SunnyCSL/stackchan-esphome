@@ -16,10 +16,6 @@ esp32:
       CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: "y"
       CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
 
-psram:
-  mode: octal
-  speed: 80MHz
-
 wifi:
   ssid: "SC"
   password: "8447Ce8086"
@@ -34,7 +30,6 @@ api:
     key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
   on_client_connected:
     - micro_wake_word.start:
-    - logger.log: "WW started via api.on_client_connected"
 
 ota:
   - platform: esphome
@@ -70,19 +65,8 @@ time:
 # ── I2S Audio ──
 i2s_audio:
   - id: i2s_output
-    i2s_lrclk_pin:
-      number: GPIO7
-      allow_other_uses: true
-    i2s_bclk_pin:
-      number: GPIO8
-      allow_other_uses: true
-  - id: i2s_input
-    i2s_lrclk_pin:
-      number: GPIO7
-      allow_other_uses: true
-    i2s_bclk_pin:
-      number: GPIO8
-      allow_other_uses: true
+    i2s_lrclk_pin: GPIO7
+    i2s_bclk_pin: GPIO8
 
 # ── Microphone ──
 microphone:
@@ -96,19 +80,6 @@ microphone:
     i2s_mode: secondary
     i2s_audio_id: i2s_output
     channel: stereo
-
-# ── Speaker ──
-speaker:
-  - platform: i2s_audio
-    id: i2s_spk
-    i2s_dout_pin: GPIO44
-    sample_rate: 48000
-    bits_per_sample: 32bit
-    i2s_mode: secondary
-    i2s_audio_id: i2s_output
-    dac_type: external
-    channel: stereo
-    audio_dac: aic3104_dac
 
 # ── External components ──
 external_components:
@@ -126,30 +97,17 @@ external_components:
       path: /home/radxa/stackchan-esphome/xvf3800-integration/esphome/components
     components:
       - respeaker_xvf3800
-      - aic3104
     refresh: 0s
 
-# ── XVF3800 ──
+# ── XVF3800 (I2C control only, no polling entities) ──
 respeaker_xvf3800:
   id: respeaker
   address: 0x2C
   i2c_id: internal_i2c
-  mute_switch:
-    id: mic_mute_switch
-    name: "Microphone Mute"
-  dfu_version:
-    name: "Firmware Version"
-    update_interval: 60s
   firmware:
     url: https://github.com/formatBCE/Respeaker-XVF3800-ESPHome-integration/raw/refs/heads/main/application_xvf3800_inthost-lr48-sqr-i2c-v1.0.7-release.bin
     version: "1.0.7"
     md5: 043a848f544ff2c7265ac19685daf5de
-
-# ── AIC3104 ──
-audio_dac:
-  - platform: aic3104
-    id: aic3104_dac
-    i2c_id: internal_i2c
 
 # ── Wake Word ──
 micro_wake_word:
@@ -185,7 +143,6 @@ micro_wake_word:
 voice_assistant:
   id: va
   microphone: i2s_mics
-  speaker: i2s_spk
   micro_wake_word: mww
   use_wake_word: false
   noise_suppression_level: 0
@@ -194,12 +151,12 @@ voice_assistant:
     - logger.log: "VA: Listening"
   on_stt_end:
     - logger.log: "VA: STT end"
-    - delay: 300ms  # Shared I2S bus: wait for mic to release before speaker
+    - delay: 300ms
   on_tts_start:
     - logger.log: "VA: TTS start"
   on_end:
     - logger.log: "VA: End"
-    - delay: 2s  # Shared I2S bus: wait for TTS to finish before restarting WW
+    - delay: 2s
     - micro_wake_word.start:
     - logger.log: "WW restarted after VA end"
   on_client_connected:
@@ -209,5 +166,3 @@ voice_assistant:
     - logger.log: "VA: Error - restarting WW"
     - delay: 2s
     - micro_wake_word.start:
-
-# ── LED Ring 熄咗 (DOA polling conflict with voice_assistant) ──
