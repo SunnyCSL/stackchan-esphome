@@ -407,7 +407,26 @@ async def handle_ca_cert(request):
     path = "/home/radxa/.caddy/ssl/ca.crt"
     if not os.path.exists(path):
         return web.Response(status=404, text="CA cert not found")
-    return web.FileResponse(path, headers={"Content-Disposition": "attachment; filename=Robi_Local_CA.crt"})
+    # Return as download so iPhone Safari prompts save
+    return web.FileResponse(path, headers={
+        "Content-Disposition": "attachment; filename=Robi_Local_CA.crt",
+        "Content-Type": "application/x-x509-ca-cert"
+    })
+
+async def handle_install(request):
+    """Serve CA cert installation page"""
+    html = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Robi CA 安裝</title></head>
+<body style="font-family:sans-serif;max-width:600px;margin:40px auto;padding:20px">
+<h2>🔐 Robi Local CA 認證</h2>
+<p>按下面連結下載並安裝 CA 認證到 iPhone：</p>
+<p style="margin:30px 0"><a href="/ca" style="font-size:1.2em;padding:15px 30px;background:#007AFF;color:white;text-decoration:none;border-radius:10px">📥 下載並安裝 CA 認證</a></p>
+<p>安裝後自動信任 HTTPS sphere_ui：<code>https://192.168.1.145:8443</code></p>
+<h3>安裝步驟：</h3>
+<ol><li>下載完成 → 去<b>設定 → 一般 → VPN 與裝置管理</b></li><li>搵到「Robi Local CA」→ 安裝</li><li>設定 → 一般 → 關於本機 → 憑證信任設定 → 開啟信任</li></ol>
+<p><a href="/">← 返回 Sphere UI</a></p>
+</body></html>"""
+    return web.Response(text=html, content_type='text/html')
 
 async def handle_audio_file(request):
     """Serve generated TTS audio files"""
@@ -432,6 +451,8 @@ async def main():
     app.router.add_post('/text', handle_text)
     app.router.add_get('/audio/{filename}', handle_audio_file)
     app.router.add_get('/ca', handle_ca_cert)
+    app.router.add_get('/CA', handle_ca_cert)
+    app.router.add_get('/install', handle_install)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", HTTPS_PORT, ssl_context=ssl_ctx)
