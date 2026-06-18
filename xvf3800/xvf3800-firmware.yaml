@@ -46,15 +46,6 @@ http_request:
 logger:
   level: DEBUG
 
-i2c:
-  - id: internal_i2c
-    sda: GPIO5
-    scl: GPIO6
-    scan: true
-    frequency: 100kHz
-    sda_pullup_enabled: true
-    scl_pullup_enabled: true
-
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
@@ -66,9 +57,8 @@ esphome:
 
 time:
   - platform: homeassistant
-    id: esptime
 
-# ── I2S Audio ──
+# ── I2S Audio (XVF3800 as I2S master, no MCLK needed) ──
 i2s_audio:
   - id: i2s_output
     i2s_lrclk_pin: GPIO7
@@ -98,22 +88,6 @@ external_components:
       - micro_wake_word
       - voice_assistant
     refresh: 0s
-  - source:
-      type: local
-      path: /home/radxa/stackchan-esphome/xvf3800-integration/esphome/components
-    components:
-      - respeaker_xvf3800
-    refresh: 0s
-
-# ── XVF3800 (I2C control only, no polling entities) ──
-respeaker_xvf3800:
-  id: respeaker
-  address: 0x2C
-  i2c_id: internal_i2c
-  firmware:
-    url: https://github.com/formatBCE/Respeaker-XVF3800-ESPHome-integration/raw/refs/heads/main/application_xvf3800_inthost-lr48-sqr-i2c-v1.0.7-release.bin
-    version: "1.0.7"
-    md5: 043a848f544ff2c7265ac19685daf5de
 
 # ── Wake Word ──
 micro_wake_word:
@@ -133,24 +107,17 @@ micro_wake_word:
       probability_cutoff: 0.97
     - model: hey_mycroft
       id: hey_mycroft
-      probability_cutoff: 0.95
+      probability_cutoff: 0.97
   on_wake_word_detected:
     - logger.log: "Wake word detected!"
-    - http_request.post:
-        url: http://192.168.1.145:5050/wake-word
-        json:
-          wake_word: "{{this.name}}"
-          device: xvf3800-voice
-    - delay: 200ms
     - voice_assistant.start:
-    - logger.log: "Event: VA start OK"
 
 # ── Voice Assistant ──
 voice_assistant:
   id: va
   microphone: i2s_mics
   micro_wake_word: mww
-  use_wake_word: false
+  use_wake_word: true
   noise_suppression_level: 0
   volume_multiplier: 1.0
   on_listening:
@@ -166,9 +133,8 @@ voice_assistant:
     - micro_wake_word.start:
     - logger.log: "WW restarted after VA end"
   on_client_connected:
-    - micro_wake_word.start:
-    - logger.log: "WW started (HA connected)"
+    - logger.log: "VA client connected"
+  on_client_disconnected:
+    - logger.log: "VA client disconnected"
   on_error:
-    - logger.log: "VA: Error - restarting WW"
-    - delay: 2s
-    - micro_wake_word.start:
+    - logger.log: "VA error"
