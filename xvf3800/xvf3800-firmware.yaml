@@ -1,6 +1,23 @@
+# ============================================================
+# XVF3800 - ESP32-S3 Firmware
+# Role: Minimal HA-connected node (pure infrastructure)
+# ============================================================
+# Architecture:
+#   XMOS XU316 → USB Audio → Radxa (wake word via openWakeWord)
+#   ESP32-S3  → Wi-Fi/API → Home Assistant (status + control)
+# -----------------------------------------------------------
+# XMOS-to-ESP32 I2C/I2S path: BROKEN (closed case)
+# ESP32 does NOT process audio - XMOS handles it all via USB
+# ============================================================
+
 substitutions:
   name: xvf3800-voice
   friendly_name: "XVF3800 Voice"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  min_version: 2026.5.0
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -15,6 +32,12 @@ esp32:
       CONFIG_SPIRAM_FREQ_80M: "y"
       CONFIG_SPIRAM_USE_MALLOC: "y"
       CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY: "y"
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+# ── Connectivity ──────────────────────────────────────────────
 
 wifi:
   ssid: "SC"
@@ -32,13 +55,10 @@ api:
 ota:
   - platform: esphome
 
+# ── System ────────────────────────────────────────────────────
+
 logger:
   level: ERROR
-
-esphome:
-  name: ${name}
-  friendly_name: ${friendly_name}
-  min_version: 2026.5.0
 
 time:
   - platform: homeassistant

@@ -1,3 +1,18 @@
+# ============================================================
+# StickS3 (Nabu) — ESP32-S3 Voice Assistant Firmware
+# Role: Primary wake word device + voice assistant
+# ============================================================
+# Architecture:
+#   micro_wake_word("okay_nabu") → on-device detection
+#   voice_assistant (use_wake_word: true) → HA pipeline (Robi)
+#   KEY1 (GPIO11) = push-to-talk fallback
+# -----------------------------------------------------------
+# Display: "Say: Okay Nabu" + time + battery
+# Microphone: I2S external (GPIO16 DIN)
+# Speaker: I2S MAX98357 (GPIO14 DOUT)
+# PMU: M5PM1 @ 0x6E (cold boot fix: 10× I2C retry)
+# ============================================================
+
 substitutions:
   name: sticks3
   friendly_name: StickS3
@@ -8,13 +23,16 @@ esphome:
   on_boot:
     - priority: 800
       then:
+        # Pre-PMU backlight — ensures display powers on ASAP
         - lambda: |-
             pinMode(38, OUTPUT);
             digitalWrite(38, HIGH);
             ESP_LOGI("pmu", "Backlight GPIO38 set HIGH (pre-PMU)");
         - delay: 1000ms
+
     - priority: 600
       then:
+        # M5PM1 I2C init — retry 10× for cold boot reliability
         - lambda: |-
             uint8_t cmd[2]; uint8_t buf[2]; bool pmu_ok = false;
             for (int retry = 0; retry < 10; retry++) {
@@ -40,12 +58,17 @@ esphome:
             } else {
               ESP_LOGE("pmu", "M5PM1 I2C FAILED after 10 retries - continuing without PMU");
             }
+            # Post-PMU backlight re-assert
             pinMode(38, OUTPUT);
             digitalWrite(38, HIGH);
             ESP_LOGI("pmu", "Backlight GPIO38 set HIGH (post-PMU)");
+
     - priority: 200
       then:
+        # Start wake word detection after all subsystems ready
         - micro_wake_word.start
+
+# ── Hardware ──────────────────────────────────────────────────
 
 esp32:
   variant: esp32s3
@@ -63,6 +86,8 @@ logger:
 
 captive_portal:
 
+# ── Connectivity ──────────────────────────────────────────────
+
 wifi:
   ssid: "SC"
   password: "8447Ce8086"
@@ -79,10 +104,14 @@ api:
 ota:
   - platform: esphome
 
+# ── Time ───────────────────────────────────────────────────────
+
 time:
   - platform: homeassistant
     id: ha_time
     timezone: Asia/Hong_Kong
+
+# ── Buses ─────────────────────────────────────────────────────
 
 i2c:
   - id: bsp_i2c
@@ -94,6 +123,8 @@ i2c:
 spi:
   clk_pin: GPIO40
   mosi_pin: GPIO39
+
+# ── Display ───────────────────────────────────────────────────
 
 display:
   - platform: st7789v
@@ -141,6 +172,8 @@ font:
     id: font_sm
     size: 12
 
+# ── Sensors ───────────────────────────────────────────────────
+
 sensor:
   - platform: template
     id: battery_voltage
@@ -157,6 +190,8 @@ sensor:
       uint16_t raw = (buf[0] << 4) | (buf[1] & 0x0F);
       return raw * 0.0014f;
 
+# ── Wake Word ─────────────────────────────────────────────────
+
 micro_wake_word:
   models:
     - model: okay_nabu
@@ -168,6 +203,8 @@ micro_wake_word:
     - lambda: ESP_LOGI("ww", "Wake word detected!");
     - voice_assistant.start:
         wake_word: !lambda return wake_word;
+
+# ── Audio ─────────────────────────────────────────────────────
 
 i2s_audio:
   i2s_lrclk_pin: GPIO15
@@ -195,6 +232,8 @@ speaker:
     channel: mono
     use_apll: false
 
+# ── Voice Assistant ───────────────────────────────────────────
+
 voice_assistant:
   microphone: sticks3_mic
   speaker: sticks3_spk
@@ -218,7 +257,10 @@ voice_assistant:
     then:
       - lambda: ESP_LOGI("va", "=== VA END ===");
       - delay: 300ms
+      # Re-enable wake word after voice interaction finishes
       - micro_wake_word.start
+
+# ── Push-to-Talk ──────────────────────────────────────────────
 
 binary_sensor:
   - platform: gpio
