@@ -45,7 +45,7 @@ http_request:
   id: http_client
 
 logger:
-  level: DEBUG
+  level: ERROR
 
 esphome:
   name: ${name}
@@ -63,9 +63,7 @@ time:
 # ── I2S Audio (XVF3800 as I2S master, no MCLK needed) ──
 i2s_audio:
   - id: i2s_output
-    i2s_lrclk_pin: 
-      number: GPIO7
-      allow_other_uses: true
+    i2s_lrclk_pin: GPIO7
     i2s_bclk_pin: GPIO8
 
 # ── Microphone ──
@@ -84,10 +82,8 @@ microphone:
 # ── I2C Bus (for XVF3800 control + audio codec) ──
 i2c:
   - id: i2c_bus
-    sda: GPIO6
-    scl: 
-      number: GPIO7
-      allow_other_uses: true
+    sda: GPIO5
+    scl: GPIO6
     frequency: 100kHz
     scan: true
 
