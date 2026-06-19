@@ -1,0 +1,72 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  platformio_options:
+    build_flags:
+      - "-DCONFIG_ESP_SYSTEM_PANIC_PRINT_BACKTRACE=1"
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: arduino
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: DEBUG
+  hardware_uart: USB_SERIAL_JTAG
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+# Test: add I2C only (no PMU init)
+i2c:
+  - id: bsp_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: true
+    frequency: 100kHz
+
+# Test: add SPI display only (no fonts, no PMU)
+spi:
+  clk_pin: GPIO40
+  mosi_pin: GPIO39
+
+display:
+  - platform: st7789v
+    model: TTGO TDisplay 135x240
+    cs_pin: GPIO41
+    dc_pin: GPIO45
+    reset_pin: GPIO21
+    backlight_pin: GPIO38
+    rotation: 0°
+    id: sticks3_display
+    lambda: |-
+      it.fill(Color(5, 5, 15));
+      it.printf(8, 60, id(font_test), Color::WHITE, "BOOT OK");
+      it.printf(8, 90, id(font_test), Color(100, 200, 100), "Step1 OK");
+
+font:
+  - file: "gfonts://Figtree"
+    id: font_test
+    size: 18

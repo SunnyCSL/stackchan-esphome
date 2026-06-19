@@ -1,0 +1,113 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    - priority: 700
+      then:
+        - delay: 800ms
+    - priority: 600
+      then:
+        - lambda: |-
+            uint8_t cmd[2];
+            uint8_t buf[2];
+            bool pmu_ok = false;
+            for (int retry = 0; retry < 5; retry++) {
+              cmd[0] = 0x00;
+              auto w = id(bsp_i2c).write(0x6E, cmd, 1);
+              delay(5);
+              auto r = id(bsp_i2c).read(0x6E, buf, 1);
+              if (w == esphome::i2c::ERROR_OK && r == esphome::i2c::ERROR_OK) {
+                pmu_ok = true;
+                break;
+              }
+              ESP_LOGW("pmu", "M5PM1 I2C retry %d", retry+1);
+              delay(50);
+            }
+            if (!pmu_ok) {
+              ESP_LOGE("pmu", "M5PM1 I2C FAILED");
+            } else {
+              ESP_LOGI("pmu", "M5PM1 OK, configuring");
+              cmd[0] = 0x09; cmd[1] = 0x00; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
+              cmd[0] = 0x0A; cmd[1] = 0x00; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
+              cmd[0] = 0x06; cmd[1] = 0x1F; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
+              cmd[0] = 0x16; id(bsp_i2c).write(0x6E, cmd, 1);
+              if (id(bsp_i2c).read(0x6E, buf, 1) == esphome::i2c::ERROR_OK) {
+                buf[0] &= ~0x04;
+                cmd[0] = 0x16; cmd[1] = buf[0]; id(bsp_i2c).write(0x6E, cmd, 2);
+              }
+              delay(10);
+              cmd[0] = 0x10; cmd[1] = 0x04; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
+              cmd[0] = 0x13; cmd[1] = 0x00; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
+              cmd[0] = 0x11; cmd[1] = 0x04; id(bsp_i2c).write(0x6E, cmd, 2); delay(100);
+            }
+            pinMode(38, OUTPUT);
+            digitalWrite(38, HIGH);
+            ESP_LOGI("pmu", "Backlight GPIO38 HIGH");
+    - priority: 200
+      then:
+        - delay: 200ms
+        - delay: 100ms
+        - component.update: sticks3_display
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: arduino
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: DEBUG
+  hardware_uart: USB_SERIAL_JTAG
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+i2c:
+  - id: bsp_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: false
+
+spi:
+  clk_pin: GPIO40
+  mosi_pin: GPIO39
+
+display:
+  - platform: st7789v
+    model: TTGO TDisplay 135x240
+    cs_pin: GPIO41
+    dc_pin: GPIO45
+    reset_pin: GPIO21
+    backlight_pin: GPIO38
+    rotation: 0°
+    id: sticks3_display
+    lambda: |-
+      it.fill(Color(5, 5, 15));
+      it.printf(8, 60, id(font_test), Color::WHITE, "BOOT OK");
+      it.printf(8, 90, id(font_test), Color(100, 200, 100), "PMU OK");
+
+font:
+  - file: "gfonts://Figtree"
+    id: font_test
+    size: 18

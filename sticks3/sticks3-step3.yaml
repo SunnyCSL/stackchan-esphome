@@ -22,7 +22,7 @@ esphome:
             }
             if (!pmu_ok) { ESP_LOGE("pmu", "M5PM1 I2C FAILED"); }
             else {
-              ESP_LOGI("pmu", "M5PM1 OK, configuring power rails");
+              ESP_LOGI("pmu", "M5PM1 OK");
               cmd[0] = 0x09; cmd[1] = 0x00; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
               cmd[0] = 0x0A; cmd[1] = 0x00; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
               cmd[0] = 0x06; cmd[1] = 0x1F; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
@@ -49,7 +49,7 @@ psram:
   speed: 80MHz
 
 logger:
-  level: INFO
+  level: DEBUG
   hardware_uart: USB_SERIAL_JTAG
 
 wifi:
@@ -89,17 +89,14 @@ display:
     id: sticks3_display
     lambda: |-
       it.fill(Color(5, 5, 15));
-      it.printf(8, 60, id(font_md), Color::WHITE, "StickS3 Ready");
-      it.printf(8, 90, id(font_sm), Color(100, 200, 100), "KEY1=Talk");
+      it.printf(8, 60, id(font_test), Color::WHITE, "BOOT OK");
 
 font:
   - file: "gfonts://Figtree"
-    id: font_md
+    id: font_test
     size: 18
-  - file: "gfonts://Figtree"
-    id: font_sm
-    size: 12
 
+# TEST: Add I2S audio only
 i2s_audio:
   i2s_lrclk_pin: GPIO15
   i2s_bclk_pin: GPIO17
@@ -114,7 +111,7 @@ microphone:
     sample_rate: 16000
     bits_per_sample: 16bit
     channel: stereo
-    use_apll: false
+    use_apll: true
 
 speaker:
   - platform: i2s_audio
@@ -124,38 +121,4 @@ speaker:
     sample_rate: 16000
     bits_per_sample: 16bit
     channel: mono
-    use_apll: false
-
-voice_assistant:
-  microphone: sticks3_mic
-  speaker: sticks3_spk
-  volume_multiplier: 2.0
-  on_client_connected:
-    then:
-      - lambda: ESP_LOGI("va", "HA voice client CONNECTED");
-  on_client_disconnected:
-    then:
-      - lambda: ESP_LOGW("va", "HA voice client DISCONNECTED");
-  on_listening:
-    then:
-      - lambda: ESP_LOGI("va", "=== LISTENING ===");
-  on_tts_start:
-    then:
-      - lambda: ESP_LOGI("va", "=== SPEAKING ===");
-  on_end:
-    then:
-      - lambda: ESP_LOGI("va", "=== VA END ===");
-
-binary_sensor:
-  - platform: gpio
-    name: "KEY1 Voice Trigger"
-    pin:
-      number: GPIO11
-      mode:
-        input: true
-        pullup: true
-      inverted: true
-    id: key1
-    on_press:
-      - voice_assistant.start:
-          wake_word: "false"
+    use_apll: true

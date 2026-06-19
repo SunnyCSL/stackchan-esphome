@@ -1,0 +1,436 @@
+substitutions:
+  name: sticks3
+  friendly_name: StickS3
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  includes:
+    - udp_audio_stream.h
+  platformio_options:
+    build_flags:
+      - "-DCONFIG_ESP_SYSTEM_PANIC_PRINT_BACKTRACE=1"
+      - "-DCONFIG_FREERTOS_CHECK_STACKOVERFLOW=3"
+  on_boot:
+    - priority: 700
+      then:
+        - delay: 800ms  # Warmup: let M5PM1 stabilize before I2C access
+    - priority: 600
+      then:
+        - lambda: |-
+            // M5PM1 @ 0x6E: full init with retry logic
+            uint8_t cmd[2];
+            uint8_t buf[2];
+
+            // Retry I2C up to 5 times on cold boot
+            bool pmu_ok = false;
+            for (int retry = 0; retry < 5; retry++) {
+              cmd[0] = 0x00;
+              auto w = id(bsp_i2c).write(0x6E, cmd, 1);
+              delay(5);
+              auto r = id(bsp_i2c).read(0x6E, buf, 1);
+              if (w == esphome::i2c::ERROR_OK && r == esphome::i2c::ERROR_OK) {
+                pmu_ok = true;
+                break;
+              }
+              ESP_LOGW("pmu", "M5PM1 I2C retry %d: w=%d r=%d", retry+1, (int)w, (int)r);
+              delay(50);
+            }
+
+            if (!pmu_ok) {
+              ESP_LOGE("pmu", "M5PM1 I2C FAILED after 5 retries — display may be dark");
+            } else {
+              ESP_LOGI("pmu", "M5PM1 I2C OK, configuring power rails");
+
+              // 1. Disable I2C idle sleep (reg 0x09 = 0x00)
+              cmd[0] = 0x09; cmd[1] = 0x00;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+              delay(10);
+
+              // 2. Disable watchdog (reg 0x0A = 0x00)
+              cmd[0] = 0x0A; cmd[1] = 0x00;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+              delay(10);
+
+              // 3. PWR_CFG: all rails on (reg 0x06 = 0x1F)
+              cmd[0] = 0x06; cmd[1] = 0x1F;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+              delay(10);
+
+              // 4. GPIO_FUNC0: PYG2 = GPIO function (clear bit2)
+              cmd[0] = 0x16;
+              id(bsp_i2c).write(0x6E, cmd, 1);
+              if (id(bsp_i2c).read(0x6E, buf, 1) == esphome::i2c::ErrorCode::ERROR_OK) {
+                buf[0] &= ~0x04;
+                cmd[0] = 0x16; cmd[1] = buf[0];
+                id(bsp_i2c).write(0x6E, cmd, 2);
+              }
+              delay(10);
+
+              // 5. GPIO_MODE: PYG2 output (reg 0x10 bit2 = 1)
+              cmd[0] = 0x10; cmd[1] = 0x04;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+              delay(10);
+
+              // 6. GPIO_DRV: push-pull (reg 0x13 = 0x00)
+              cmd[0] = 0x13; cmd[1] = 0x00;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+              delay(10);
+
+              // 7. GPIO_OUT: PYG2 HIGH → L3B ON (reg 0x11 bit2 = 1)
+              cmd[0] = 0x11; cmd[1] = 0x04;
+              id(bsp_i2c).write(0x6E, cmd, 2);
+              delay(100);
+            }
+            // Force backlight HIGH via GPIO38 after PMU rails are up
+            pinMode(38, OUTPUT);
+            digitalWrite(38, HIGH);
+            ESP_LOGI("pmu", "Backlight GPIO38 forced HIGH");
+    - priority: 200
+      then:
+        - delay: 200ms
+        # Backlight now controlled via st7789v backlight_pin (GPIO38) - no manual control needed
+        # light.turn_on removed to avoid GPIO conflict
+        - delay: 100ms
+        - component.update: sticks3_display
+    - priority: 100
+      then:
+        - delay: 500ms
+        - lambda: |-
+            udp_stream_init("192.168.1.145", 15001);
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: arduino
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+web_server:
+  port: 80
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+  reboot_timeout: 30min
+
+ota:
+  - platform: esphome
+
+logger:
+  level: DEBUG
+  hardware_uart: USB_SERIAL_JTAG
+  logs:
+    text_sensor: WARN
+
+i2c:
+  - id: bsp_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: false
+
+spi:
+  clk_pin: GPIO40
+  mosi_pin: GPIO39
+
+# ── Time (HA sync + NTP fallback for fast boot sync) ──
+time:
+  - platform: homeassistant
+    id: esptime
+    on_time:
+      - seconds: /1
+        then:
+          - component.update: sticks3_display
+
+# Backlight controlled via st7789v backlight_pin (GPIO38)
+# Removed LEDC PWM light to avoid GPIO conflict
+
+# ── Sensors ──
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+
+  # Battery via M5PM1 register 0x22-0x23 (12-bit ADC, 1mV/LSB)
+  - platform: template
+    name: "Battery"
+    id: battery
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    update_interval: 10s
+    filters:
+      - exponential_moving_average:
+          alpha: 0.3
+          send_every: 2
+    lambda: |-
+      uint8_t reg = 0x22;
+      uint8_t buf[2];
+      if (id(bsp_i2c)->write(0x6E, &reg, 1) == esphome::i2c::ERROR_OK) {
+        delay(1);
+        if (id(bsp_i2c)->read(0x6E, buf, 2) == esphome::i2c::ERROR_OK) {
+          uint16_t raw = (buf[1] << 8) | buf[0];
+          return (float)raw / 1000.0;
+        }
+      }
+      return NAN;
+
+# ── Voice state (shared between voice_assistant callbacks and display) ──
+globals:
+  - id: voice_state
+    type: std::string
+    restore_value: false
+    initial_value: '"Idle"'
+  - id: display_line1
+    type: std::string
+    restore_value: false
+    initial_value: '"StickS3 Ready"'
+  - id: display_line2
+    type: std::string
+    restore_value: false
+    initial_value: '"KEY1=Talk"'
+  - id: display_line3
+    type: std::string
+    restore_value: false
+    initial_value: '"192.168.1.222"'
+  - id: udp_streaming_active
+    type: bool
+    restore_value: false
+    initial_value: "false"
+
+# ── Text entities (pushable from HA) ──
+text:
+  - platform: template
+    name: "StickS3 Line 1"
+    id: sticks3_line1
+    mode: text
+    update_interval: 1s
+    lambda: return id(display_line1);
+    set_action:
+      then:
+        - lambda: id(display_line1) = x;
+        - component.update: sticks3_display
+  - platform: template
+    name: "StickS3 Line 2"
+    id: sticks3_line2
+    mode: text
+    update_interval: 1s
+    lambda: return id(display_line2);
+    set_action:
+      then:
+        - lambda: id(display_line2) = x;
+        - component.update: sticks3_display
+  - platform: template
+    name: "StickS3 Line 3"
+    id: sticks3_line3
+    mode: text
+    update_interval: 1s
+    lambda: return id(display_line3);
+    set_action:
+      then:
+        - lambda: id(display_line3) = x;
+        - component.update: sticks3_display
+
+# ── Display (ST7789V 135x240) ──
+display:
+  - platform: st7789v
+    model: TTGO TDisplay 135x240
+    cs_pin: GPIO41
+    dc_pin: GPIO45
+    reset_pin: GPIO21
+    backlight_pin: GPIO38
+    rotation: 0°
+    update_interval: 1s
+    id: sticks3_display
+    lambda: |-
+      it.fill(Color(5, 5, 15));
+
+      // ── Top: Clock (big, left-aligned with padding) ──
+      auto time = id(esptime).now();
+      if (time.is_valid()) {
+        it.strftime(8, 4, id(font_lg), Color(100, 200, 255), TextAlign::TOP_LEFT, "%H:%M", time);
+      } else {
+        it.printf(8, 8, id(font_lg), Color(60, 60, 80), TextAlign::TOP_LEFT, "--:--");
+      }
+
+      // ── Middle: Status lines ──
+      // Line 1 (voice state / main status)
+      it.printf(8, 52, id(font_md), Color::WHITE, "%s", id(display_line1).c_str());
+      // Line 2 (secondary status)
+      it.printf(8, 78, id(font_md), Color(160, 160, 160), "%s", id(display_line2).c_str());
+
+      // ── Bottom-right: Battery % ──
+      float vbat = id(battery).get_state();
+      if (!isnan(vbat)) {
+        int pct = (int)((vbat - 3.2) / (4.2 - 3.2) * 100);
+        if (pct < 0) pct = 0;
+        if (pct > 100) pct = 100;
+        
+        // Battery icon bar (5 segments)
+        int bar_w = 50;
+        int bar_h = 10;
+        int bar_x = 135 - bar_w - 8;
+        int bar_y = 188;
+        
+        // Frame
+        it.rectangle(bar_x, bar_y, bar_w, bar_h, Color(200, 200, 200));
+        it.filled_rectangle(bar_x + bar_w, bar_y + 3, 3, bar_h - 6, Color(200, 200, 200));
+        
+        // Fill
+        int fill_w = (pct * (bar_w - 4)) / 100;
+        Color fill_color;
+        if (pct > 60) fill_color = Color(0, 220, 0);
+        else if (pct > 20) fill_color = Color(220, 180, 0);
+        else fill_color = Color(220, 0, 0);
+        
+        if (fill_w > 0) {
+          it.filled_rectangle(bar_x + 2, bar_y + 2, fill_w, bar_h - 4, fill_color);
+        }
+        
+        // Percentage text
+        char pct_buf[8];
+        sprintf(pct_buf, "%d%%", pct);
+        it.printf(bar_x - 48, bar_y - 2, id(font_md), fill_color, TextAlign::TOP_LEFT, "%s", pct_buf);
+      }
+
+      // ── Bottom: IP address ──
+      it.printf(8, 225, id(font_sm), Color(80, 80, 80), "%s", id(display_line3).c_str());
+
+# ── Fonts ──
+font:
+  - file: "gfonts://Figtree"
+    id: font_lg
+    size: 32
+    glyphs: " !\"%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz"
+  - file: "gfonts://Figtree"
+    id: font_md
+    size: 18
+    glyphs: " !\"%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz"
+  - file: "gfonts://Figtree"
+    id: font_sm
+    size: 12
+    glyphs: " !\"&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz"
+
+# ── Voice Pipeline (I2S Audio) ──
+i2s_audio:
+  i2s_lrclk_pin: GPIO15
+  i2s_bclk_pin: GPIO17
+  i2s_mclk_pin: GPIO18
+
+# ── Audio streaming (external C++ helper: udp_audio_stream.h) ──
+script:
+  - id: audiostream_send
+    then:
+      - lambda: |-
+          ESP_LOGI("udp", "Starting UDP audio stream → 192.168.1.145:15001");
+          udp_stream_start();
+      - while:
+          condition:
+            lambda: 'return id(udp_streaming_active);'
+          then:
+            - lambda: 'udp_stream_loop();'
+            - delay: 10ms
+      - lambda: |-
+          udp_stream_stop();
+          ESP_LOGI("udp", "UDP audio stream stopped");
+
+microphone:
+  - platform: i2s_audio
+    id: sticks3_mic
+    adc_type: external
+    i2s_din_pin: GPIO16
+    pdm: false
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: stereo
+    use_apll: true
+
+speaker:
+  - platform: i2s_audio
+    id: sticks3_spk
+    dac_type: external
+    i2s_dout_pin: GPIO14
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: mono
+    use_apll: true
+
+# ── Voice Assistant (local pipeline) ──
+# DISABLED — causes crash on start (all ESPHome versions)
+# voice_assistant:
+#   microphone: sticks3_mic
+#   volume_multiplier: 2.0
+#   on_client_connected: ...
+#   on_client_disconnected: ...
+#   on_error: ...
+#   on_listening: ...
+#   on_tts_start: ...
+#   on_stt_end: ...
+#   on_end: ...
+
+# ── Buttons ──
+binary_sensor:
+  - platform: gpio
+    name: "KEY1 Voice Trigger"
+    pin:
+      number: GPIO11
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    id: key1
+    on_press:
+      - lambda: |-
+          ESP_LOGI("key", "KEY1 PRESSED → start UDP stream");
+          id(udp_streaming_active) = true;
+          id(voice_state) = "Listening";
+          id(display_line1) = "🎤 Streaming...";
+          id(display_line2) = "Release=stop";
+      - component.update: sticks3_display
+      - script.execute: audiostream_send
+    on_release:
+      - lambda: |-
+          ESP_LOGI("key", "KEY1 RELEASED → stop UDP stream");
+          id(udp_streaming_active) = false;
+          id(voice_state) = "Idle";
+          id(display_line1) = "StickS3 Ready";
+          id(display_line2) = "KEY1=Talk";
+      - component.update: sticks3_display
+
+  - platform: gpio
+    name: "KEY2"
+    pin:
+      number: GPIO12
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    id: key2
+    on_press:
+      - lambda: |-
+          ESP_LOGI("key", "KEY2 PRESSED → start UDP stream");
+          id(udp_streaming_active) = true;
+          id(voice_state) = "Listening";
+          id(display_line1) = "🎤 Streaming...";
+          id(display_line2) = "Press=stop";
+      - component.update: sticks3_display
+      - script.execute: audiostream_send
+    on_release:
+      - lambda: |-
+          ESP_LOGI("key", "KEY2 RELEASED → stop UDP stream");
+          id(udp_streaming_active) = false;
+          id(voice_state) = "Idle";
+          id(display_line1) = "StickS3 Ready";
+          id(display_line2) = "KEY1=Talk";
+      - component.update: sticks3_display

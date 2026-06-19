@@ -15,12 +15,6 @@ esp32:
       CONFIG_SPIRAM_FREQ_80M: "y"
       CONFIG_SPIRAM_USE_MALLOC: "y"
       CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY: "y"
-      CONFIG_SPIRAM_RODATA: "y"
-      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
-      CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST: "y"
-      CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: "y"
-      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
-      CONFIG_MBEDTLS_SSL_PROTO_TLS1_3: "y"
 
 wifi:
   ssid: "SC"
@@ -34,15 +28,9 @@ wifi:
 api:
   encryption:
     key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
-  on_client_connected:
-    - logger.log: "API client connected, wake word already running"
-    # Wake word started via on_boot, not here - avoids restart loop
 
 ota:
   - platform: esphome
-
-http_request:
-  id: http_client
 
 logger:
   level: ERROR
@@ -51,117 +39,6 @@ esphome:
   name: ${name}
   friendly_name: ${friendly_name}
   min_version: 2026.5.0
-  on_boot:
-    priority: 800
-    then:
-      - delay: 3s
-      - micro_wake_word.start:
 
 time:
   - platform: homeassistant
-
-# ── I2S Audio (XVF3800 as I2S master, no MCLK needed) ──
-i2s_audio:
-  - id: i2s_output
-    i2s_lrclk_pin: GPIO7
-    i2s_bclk_pin: GPIO8
-
-# ── Microphone ──
-microphone:
-  - platform: i2s_audio
-    id: i2s_mics
-    i2s_din_pin: GPIO43
-    adc_type: external
-    pdm: false
-    sample_rate: 48000
-    bits_per_sample: 32bit
-    i2s_mode: secondary
-    i2s_audio_id: i2s_output
-    channel: stereo
-
-# ── I2C Bus (for XVF3800 control + audio codec) ──
-i2c:
-  - id: i2c_bus
-    sda: GPIO5
-    scl: GPIO6
-    frequency: 100kHz
-    scan: true
-
-# ── XVF3800 Component (auto-flash XMOS firmware via I2C) ──
-respeaker_xvf3800:
-  id: xvf3800
-  i2c_id: i2c_bus
-  dfu_version:
-    name: "XVF3800 DFU Version"
-  firmware:
-    url: https://github.com/formatBCE/Respeaker-XVF3800-ESPHome-integration/raw/main/application_xvf3800_inthost-lr48-sqr-i2c-v1.0.7-release.bin
-    version: "1.0.7"
-    md5: 043a848f544ff2c7265ac19685daf5de
-
-# ── External components ──
-external_components:
-  - source:
-      type: local
-      path: formatBCE-esphome-local/esphome/components
-    components:
-      - i2s_audio
-      - micro_wake_word
-      - voice_assistant
-      - audio
-  - source:
-      type: git
-      url: https://github.com/formatBCE/Respeaker-XVF3800-ESPHome-integration
-      ref: main
-    components:
-      - respeaker_xvf3800
-    refresh: 0s
-
-# ── Wake Word ──
-micro_wake_word:
-  id: mww
-  microphone:
-    microphone: i2s_mics
-    channels: 1
-  stop_after_detection: false
-  vad:
-    probability_cutoff: 0.01
-  models:
-    - model: https://github.com/OHF-Voice/micro-wake-word/releases/download/okay_nabu_20241226.3/okay_nabu.json
-      id: okay_nabu
-      probability_cutoff: 0.05
-    - model: hey_jarvis
-      id: hey_jarvis
-      probability_cutoff: 0.97
-    - model: hey_mycroft
-      id: hey_mycroft
-      probability_cutoff: 0.97
-  on_wake_word_detected:
-    - logger.log: "Wake word detected!"
-    - voice_assistant.start:
-
-# ── Voice Assistant ──
-voice_assistant:
-  id: va
-  microphone: i2s_mics
-  micro_wake_word: mww
-  use_wake_word: true
-  noise_suppression_level: 0
-  volume_multiplier: 1.0
-  on_listening:
-    - logger.log: "VA: Listening"
-  on_stt_end:
-    - logger.log: "VA: STT end"
-    - delay: 300ms
-  on_tts_start:
-    - logger.log: "VA: TTS start"
-  on_end:
-    - logger.log: "VA: End"
-    - delay: 2s
-    - micro_wake_word.start:
-    - logger.log: "WW restarted after VA end"
-  on_client_connected:
-    - logger.log: "VA client connected"
-  on_client_disconnected:
-    - logger.log: "VA client disconnected"
-  on_error:
-    - logger.log: "VA error"
