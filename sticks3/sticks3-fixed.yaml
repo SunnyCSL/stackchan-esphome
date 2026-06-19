@@ -6,25 +6,27 @@ esphome:
   name: ${name}
   friendly_name: ${friendly_name}
   on_boot:
-    - priority: 700
+    - priority: 800
       then:
-        - delay: 800ms
+        - lambda: |-
+            pinMode(38, OUTPUT);
+            digitalWrite(38, HIGH);
+            ESP_LOGI("pmu", "Backlight GPIO38 set HIGH (pre-PMU)");
+        - delay: 1000ms
     - priority: 600
       then:
         - lambda: |-
             uint8_t cmd[2]; uint8_t buf[2]; bool pmu_ok = false;
-            for (int retry = 0; retry < 5; retry++) {
+            for (int retry = 0; retry < 10; retry++) {
               cmd[0] = 0x00;
-              auto w = id(bsp_i2c).write(0x6E, cmd, 1); delay(5);
+              auto w = id(bsp_i2c).write(0x6E, cmd, 1); delay(10);
               auto r = id(bsp_i2c).read(0x6E, buf, 1);
               if (w == esphome::i2c::ERROR_OK && r == esphome::i2c::ERROR_OK) { pmu_ok = true; break; }
-              ESP_LOGW("pmu", "M5PM1 I2C retry %d", retry+1); delay(50);
+              ESP_LOGW("pmu", "M5PM1 I2C retry %d/10", retry+1);
+              delay(100);
             }
-            if (!pmu_ok) { ESP_LOGE("pmu", "M5PM1 I2C FAILED"); }
-            else {
+            if (pmu_ok) {
               ESP_LOGI("pmu", "M5PM1 OK, configuring power rails");
-              cmd[0] = 0x09; cmd[1] = 0x00; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
-              cmd[0] = 0x0A; cmd[1] = 0x00; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
               cmd[0] = 0x06; cmd[1] = 0x1F; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
               cmd[0] = 0x16; id(bsp_i2c).write(0x6E, cmd, 1);
               if (id(bsp_i2c).read(0x6E, buf, 1) == esphome::i2c::ERROR_OK) {
@@ -33,10 +35,17 @@ esphome:
               delay(10);
               cmd[0] = 0x10; cmd[1] = 0x04; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
               cmd[0] = 0x13; cmd[1] = 0x00; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
-              cmd[0] = 0x11; cmd[1] = 0x04; id(bsp_i2c).write(0x6E, cmd, 2); delay(100);
+              cmd[0] = 0x11; cmd[1] = 0x04; id(bsp_i2c).write(0x6E, cmd, 2); delay(200);
+              ESP_LOGI("pmu", "M5PM1 power rails configured");
+            } else {
+              ESP_LOGE("pmu", "M5PM1 I2C FAILED after 10 retries - continuing without PMU");
             }
-            pinMode(38, OUTPUT); digitalWrite(38, HIGH);
-            ESP_LOGI("pmu", "Backlight GPIO38 HIGH");
+            pinMode(38, OUTPUT);
+            digitalWrite(38, HIGH);
+            ESP_LOGI("pmu", "Backlight GPIO38 set HIGH (post-PMU)");
+    - priority: 200
+      then:
+        - micro_wake_word.start
 
 esp32:
   variant: esp32s3
@@ -51,6 +60,8 @@ psram:
 logger:
   level: INFO
   hardware_uart: USB_SERIAL_JTAG
+
+captive_portal:
 
 wifi:
   ssid: "SC"
@@ -68,11 +79,17 @@ api:
 ota:
   - platform: esphome
 
+time:
+  - platform: homeassistant
+    id: ha_time
+    timezone: Asia/Hong_Kong
+
 i2c:
   - id: bsp_i2c
     sda: GPIO47
     scl: GPIO48
     scan: false
+    frequency: 400kHz
 
 spi:
   clk_pin: GPIO40
@@ -87,10 +104,34 @@ display:
     backlight_pin: GPIO38
     rotation: 0°
     id: sticks3_display
+    update_interval: 2s
     lambda: |-
+      auto t = id(ha_time).now();
+      float bat_v = id(battery_voltage).state;
+      int bat_pct = 0;
+      if (!isnan(bat_v)) {
+        if (bat_v > 4.1) bat_pct = 100;
+        else if (bat_v > 3.9) bat_pct = 75;
+        else if (bat_v > 3.7) bat_pct = 50;
+        else if (bat_v > 3.5) bat_pct = 25;
+        else bat_pct = 10;
+      }
       it.fill(Color(5, 5, 15));
-      it.printf(8, 60, id(font_md), Color::WHITE, "StickS3 Ready");
-      it.printf(8, 90, id(font_sm), Color(100, 200, 100), "KEY1=Talk");
+      if (t.is_valid()) {
+        char time_str[16];
+        snprintf(time_str, sizeof(time_str), "%02d:%02d", t.hour, t.minute);
+        it.printf(8, 8, id(font_md), Color::WHITE, "%s", time_str);
+      } else {
+        it.printf(8, 8, id(font_sm), Color(100,100,100), "Syncing...");
+      }
+      if (!isnan(bat_v)) {
+        char bat_str[16];
+        snprintf(bat_str, sizeof(bat_str), "BAT %d%%", bat_pct);
+        it.printf(80, 10, id(font_sm), bat_v > 3.5 ? Color(100,200,100) : Color(255,100,100), "%s", bat_str);
+      }
+      it.printf(8, 55, id(font_md), Color::WHITE, "Say:");
+      it.printf(8, 78, id(font_md), Color(100, 200, 255), "\"Okay Nabu\"");
+      it.printf(8, 110, id(font_sm), Color(100, 100, 100), "KEY1=Push to Talk");
 
 font:
   - file: "gfonts://Figtree"
@@ -99,6 +140,34 @@ font:
   - file: "gfonts://Figtree"
     id: font_sm
     size: 12
+
+sensor:
+  - platform: template
+    id: battery_voltage
+    name: "StickS3 Battery Voltage"
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    update_interval: 30s
+    lambda: |-
+      uint8_t reg = 0x09;
+      uint8_t buf[2] = {0, 0};
+      if (id(bsp_i2c).write(0x6E, &reg, 1) != esphome::i2c::ERROR_OK) return NAN;
+      delay(5);
+      if (id(bsp_i2c).read(0x6E, buf, 2) != esphome::i2c::ERROR_OK) return NAN;
+      uint16_t raw = (buf[0] << 4) | (buf[1] & 0x0F);
+      return raw * 0.0014f;
+
+micro_wake_word:
+  models:
+    - model: okay_nabu
+  microphone:
+    microphone: sticks3_mic
+    channels: 0
+    gain_factor: 4
+  on_wake_word_detected:
+    - lambda: ESP_LOGI("ww", "Wake word detected!");
+    - voice_assistant.start:
+        wake_word: !lambda return wake_word;
 
 i2s_audio:
   i2s_lrclk_pin: GPIO15
@@ -129,7 +198,10 @@ speaker:
 voice_assistant:
   microphone: sticks3_mic
   speaker: sticks3_spk
+  use_wake_word: true
   volume_multiplier: 2.0
+  noise_suppression_level: 2
+  auto_gain: 31dBFS
   on_client_connected:
     then:
       - lambda: ESP_LOGI("va", "HA voice client CONNECTED");
@@ -145,10 +217,12 @@ voice_assistant:
   on_end:
     then:
       - lambda: ESP_LOGI("va", "=== VA END ===");
+      - delay: 300ms
+      - micro_wake_word.start
 
 binary_sensor:
   - platform: gpio
-    name: "KEY1 Voice Trigger"
+    name: "KEY1 Push to Talk"
     pin:
       number: GPIO11
       mode:
@@ -156,6 +230,11 @@ binary_sensor:
         pullup: true
       inverted: true
     id: key1
+    filters:
+      - delayed_on: 10ms
+      - delayed_off: 10ms
     on_press:
-      - voice_assistant.start:
-          wake_word: "false"
+      then:
+        - lambda: ESP_LOGI("key1", "KEY1 pressed!");
+        - voice_assistant.start:
+            wake_word: "false"
