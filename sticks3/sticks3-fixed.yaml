@@ -58,7 +58,7 @@ esphome:
             } else {
               ESP_LOGE("pmu", "M5PM1 I2C FAILED after 10 retries - continuing without PMU");
             }
-            # Post-PMU backlight re-assert
+            // Post-PMU backlight re-assert
             pinMode(38, OUTPUT);
             digitalWrite(38, HIGH);
             ESP_LOGI("pmu", "Backlight GPIO38 set HIGH (post-PMU)");
