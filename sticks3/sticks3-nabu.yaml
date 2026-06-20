@@ -1,0 +1,304 @@
+# ============================================================
+# StickS3 (Nabu) — Portable Voice Remote + Status Display
+# Hardware:
+#   ESP32-S3 + 8MB PSRAM + ST7789 135x240
+#   ES8311 audio (MEMS mic + speaker)
+#   IR TX(GPIO46) + IR RX(GPIO42)
+#   BMI270 IMU (6-axis)
+#   M5PM1 power management
+#   KEY1(GPIO11) + KEY2(GPIO12)
+#   250mAh battery
+# ============================================================
+
+substitutions:
+  name: sticks3
+  friendly_name: StickS3-Nabu
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    - priority: 800
+      then:
+        - lambda: |-
+            pinMode(38, OUTPUT);
+            digitalWrite(38, HIGH);
+        - delay: 800ms
+    - priority: 600
+      then:
+        - lambda: |-
+            uint8_t cmd[2]; uint8_t buf[2]; bool pmu_ok = false;
+            for (int retry = 0; retry < 10; retry++) {
+              cmd[0] = 0x00;
+              auto w = id(bsp_i2c).write(0x6E, cmd, 1); delay(10);
+              auto r = id(bsp_i2c).read(0x6E, buf, 1);
+              if (w == esphome::i2c::ERROR_OK && r == esphome::i2c::ERROR_OK) { pmu_ok = true; break; }
+              delay(100);
+            }
+            if (pmu_ok) {
+              cmd[0] = 0x06; cmd[1] = 0x1F; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
+              cmd[0] = 0x16; id(bsp_i2c).write(0x6E, cmd, 1);
+              if (id(bsp_i2c).read(0x6E, buf, 1) == esphome::i2c::ERROR_OK) {
+                buf[0] &= ~0x04; cmd[0] = 0x16; cmd[1] = buf[0]; id(bsp_i2c).write(0x6E, cmd, 2);
+              }
+              delay(10);
+              cmd[0] = 0x10; cmd[1] = 0x04; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
+              cmd[0] = 0x13; cmd[1] = 0x00; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
+              cmd[0] = 0x11; cmd[1] = 0x04; id(bsp_i2c).write(0x6E, cmd, 2); delay(200);
+            }
+            pinMode(38, OUTPUT);
+            digitalWrite(38, HIGH);
+    - priority: 200
+      then:
+        - micro_wake_word.start
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: arduino
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: INFO
+  hardware_uart: USB_SERIAL_JTAG
+
+captive_portal:
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  manual_ip:
+    static_ip: 192.168.1.222
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+  ap:
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+http_request:
+  id: http_client
+  useragent: "StickS3-Nabu"
+  timeout: 5s
+
+time:
+  - platform: homeassistant
+    id: ha_time
+    timezone: Asia/Hong_Kong
+
+i2c:
+  - id: bsp_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: false
+    frequency: 400kHz
+
+spi:
+  clk_pin: GPIO40
+  mosi_pin: GPIO39
+
+# ── Display ───────────────────────────────────────────────────
+display:
+  - platform: st7789v
+    model: TTGO TDisplay 135x240
+    cs_pin: GPIO41
+    dc_pin: GPIO45
+    reset_pin: GPIO21
+    backlight_pin: GPIO38
+    rotation: 0
+    id: sticks3_display
+    update_interval: 1s
+    lambda: |-
+      auto t = id(ha_time).now();
+      float bat_v = id(battery_voltage).state;
+      int bat_pct = 0;
+      if (!isnan(bat_v)) {
+        if (bat_v > 4.1) bat_pct = 100;
+        else if (bat_v > 3.9) bat_pct = 75;
+        else if (bat_v > 3.7) bat_pct = 50;
+        else if (bat_v > 3.5) bat_pct = 25;
+        else bat_pct = 10;
+      }
+      it.fill(Color(5, 5, 15));
+
+      // Top bar: time + battery
+      if (t.is_valid()) {
+        char ts[16];
+        snprintf(ts, sizeof(ts), "%02d:%02d", t.hour, t.minute);
+        it.printf(4, 4, id(font_lg), Color::WHITE, "%s", ts);
+      }
+      if (!isnan(bat_v)) {
+        char bs[8];
+        snprintf(bs, sizeof(bs), "%d%%", bat_pct);
+        it.printf(95, 6, id(font_sm), bat_v > 3.5 ? Color(100,200,100) : Color(255,100,100), "%s", bs);
+      }
+
+      // Voice state
+      std::string st = id(voice_state).state;
+      if (st == "listening") {
+        it.printf(4, 55, id(font_lg), Color(100, 200, 100), "LISTEN");
+        it.printf(4, 80, id(font_sm), Color(100,200,100), "Recording...");
+      } else if (st == "thinking") {
+        it.printf(4, 55, id(font_lg), Color(200, 200, 100), "THINK");
+        it.printf(4, 80, id(font_sm), Color(200,200,100), "Processing...");
+      } else if (st == "speaking") {
+        it.printf(4, 55, id(font_lg), Color(100, 200, 255), "SPEAK");
+        it.printf(4, 80, id(font_sm), Color(100,200,255), "Robi talking...");
+      } else {
+        it.printf(4, 50, id(font_lg), Color::WHITE, "Robi");
+        it.printf(4, 78, id(font_md), Color(100, 200, 255), "Say \"Robi\"");
+        it.printf(4, 108, id(font_sm), Color(80,80,80), "KEY1=Talk  KEY2=IR");
+      }
+
+font:
+  - file: "gfonts://Figtree"
+    id: font_lg
+    size: 22
+  - file: "gfonts://Figtree"
+    id: font_md
+    size: 16
+  - file: "gfonts://Figtree"
+    id: font_sm
+    size: 11
+
+# ── Voice State (set by HA API / Radxa bridge) ────────────────
+text_sensor:
+  - platform: template
+    id: voice_state
+    name: "StickS3 Voice State"
+    update_interval: never
+    lambda: return {"idle"};
+    on_value:
+      then:
+        - component.update: sticks3_display
+
+sensor:
+  - platform: template
+    id: battery_voltage
+    name: "StickS3 Battery Voltage"
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    update_interval: 60s
+    lambda: |-
+      uint8_t reg = 0x09;
+      uint8_t buf[2] = {0, 0};
+      if (id(bsp_i2c).write(0x6E, &reg, 1) != esphome::i2c::ERROR_OK) return NAN;
+      delay(5);
+      if (id(bsp_i2c).read(0x6E, buf, 2) != esphome::i2c::ERROR_OK) return NAN;
+      uint16_t raw = (buf[0] << 4) | (buf[1] & 0x0F);
+      return raw * 0.0014f;
+
+# ── IMU (BMI270) — orientation / tap detection ────────────────
+# Note: BMI270 is on same I2C bus @ 0x68
+# ESPHome doesn't have native BMI270 support yet.
+# For now: use orientation via template sensor from HA.
+# When held horizontally = sitting on table
+# When vertical = being held
+
+# ── IR Transmitter ────────────────────────────────────────────
+remote_transmitter:
+  - id: ir_tx
+    pin: GPIO46
+    carrier_duty_percent: 50%
+
+# ── IR Receiver ───────────────────────────────────────────────
+# Note: Must disable speaker amp before IR receive!
+# M5PM1 reg 0x11 bit 2 controls SPK amp
+remote_receiver:
+  - id: ir_rx
+    pin: GPIO42
+    rmt_symbols: 64
+    tolerance: 50%
+    # Speaker amp must be OFF during IR receive (M5PM1 reg control)
+
+# ── Wake Word ─────────────────────────────────────────────────
+micro_wake_word:
+  models:
+    - model: okay_nabu
+  microphone:
+    microphone: sticks3_mic
+    channels: 0
+    gain_factor: 4
+  on_wake_word_detected:
+    - lambda: |-
+        ESP_LOGI("ww", "WAKE: Okay Nabu!");
+        id(voice_state).publish_state("listening");
+    - http_request.post:
+        url: "http://192.168.1.145:5050/trigger-wake"
+        json:
+          source: sticks3
+          type: wake_word
+    - delay: 500ms
+    - lambda: |-
+        id(voice_state).publish_state("idle");
+
+i2s_audio:
+  i2s_lrclk_pin: GPIO15
+  i2s_bclk_pin: GPIO17
+  i2s_mclk_pin: GPIO18
+
+microphone:
+  - platform: i2s_audio
+    id: sticks3_mic
+    adc_type: external
+    i2s_din_pin: GPIO16
+    pdm: false
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: stereo
+    use_apll: false
+
+# ── Buttons ───────────────────────────────────────────────────
+binary_sensor:
+  # KEY1 = Push to Talk (trigger voice)
+  - platform: gpio
+    name: "KEY1 Push to Talk"
+    pin:
+      number: GPIO11
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    id: key1
+    filters:
+      - delayed_on: 10ms
+      - delayed_off: 10ms
+    on_press:
+      then:
+        - lambda: |-
+            ESP_LOGI("key1", "KEY1 pressed!");
+            id(voice_state).publish_state("listening");
+        - http_request.post:
+            url: "http://192.168.1.145:5050/trigger-wake"
+            json:
+              source: sticks3
+              type: ptt
+        - delay: 500ms
+        - lambda: |-
+            id(voice_state).publish_state("idle");
+
+  # KEY2 = IR Learn Mode (future: send IR codes)
+  - platform: gpio
+    name: "KEY2 IR Mode"
+    pin:
+      number: GPIO12
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    id: key2
+    filters:
+      - delayed_on: 10ms
+      - delayed_off: 10ms
+    on_press:
+      then:
+        - lambda: |-
+            ESP_LOGI("key2", "KEY2 pressed - IR learn mode TBD");

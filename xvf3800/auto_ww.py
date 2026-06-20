@@ -36,7 +36,7 @@ def get_ha_access_token():
 def get_phone_state_via_api(token):
     try:
         req = urllib.request.Request(
-            HA_BASE + "/api/states/device_tracker.iphone",
+            HA_BASE + "/api/states/person.sunnycsl",
             headers={"Authorization": "Bearer " + token}
         )
         resp = urllib.request.urlopen(req, timeout=5)
@@ -116,3 +116,5 @@ if __name__ == "__main__":
         start_listener()
     elif state == "not_home" and running:
         stop_listener()
+    else:
+        print(f"[{datetime.now():%H:%M:%S}] No action needed (state={state}, running={running})")

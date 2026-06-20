@@ -1,13 +1,13 @@
 # ============================================================
 # XVF3800 - ESP32-S3 Firmware
-# Role: Minimal HA-connected node (pure infrastructure)
+# Role: HA-connected node + USB audio bridge infrastructure
 # ============================================================
 # Architecture:
 #   XMOS XU316 → USB Audio → Radxa (wake word via openWakeWord)
-#   ESP32-S3  → Wi-Fi/API → Home Assistant (status + control)
+#   ESP32-S3  → Wi-Fi/API → Home Assistant (assist satellite)
 # -----------------------------------------------------------
 # XMOS-to-ESP32 I2C/I2S path: BROKEN (closed case)
-# ESP32 does NOT process audio - XMOS handles it all via USB
+# ESP32 voice_assistant included for HA entity availability
 # ============================================================
 
 substitutions:
@@ -62,3 +62,31 @@ logger:
 
 time:
   - platform: homeassistant
+
+# ── I2S Audio (XMOS bridge - may not have signal) ─────────────
+# GPIO43 = I2S data from XMOS (I2C/I2S path reliability unknown)
+
+i2s_audio:
+  i2s_lrclk_pin: GPIO10
+  i2s_bclk_pin: GPIO11
+  i2s_mclk_pin: GPIO12
+
+microphone:
+  - platform: i2s_audio
+    id: xvf3800_mic
+    adc_type: external
+    i2s_din_pin: GPIO13
+    pdm: false
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: stereo
+    use_apll: false
+
+# ── Voice Assistant (stub - keeps assist_satellite available) ──
+
+voice_assistant:
+  microphone: xvf3800_mic
+  use_wake_word: false
+  on_client_connected:
+    then:
+      - lambda: ESP_LOGI("va", "XVF3800 voice client connected");
