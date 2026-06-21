@@ -7,10 +7,10 @@
 #   voice_assistant (use_wake_word: true) → HA pipeline (Robi)
 #   KEY1 (GPIO11) = push-to-talk fallback
 # -----------------------------------------------------------
-# Display: "Say: Okay Nabu" + time + battery
-# Microphone: I2S external (GPIO16 DIN)
-# Speaker: I2S MAX98357 (GPIO14 DOUT)
-# PMU: M5PM1 @ 0x6E (cold boot fix: 10× I2C retry)
+# Critical PMU fix:
+#   M5PM1 I2C init deferred to wifi.on_connect + 3s delay
+#   because I2C bus recovery only happens in main loop phase.
+#   Early on_boot init always fails with "i2c bus not initialized!"
 # ============================================================
 
 substitutions:
@@ -23,49 +23,14 @@ esphome:
   on_boot:
     - priority: 800
       then:
-        # Pre-PMU backlight — ensures display powers on ASAP
+        # Backlight ASAP — GPIO38 directly, no PMU dependency
         - lambda: |-
             pinMode(38, OUTPUT);
             digitalWrite(38, HIGH);
-            ESP_LOGI("pmu", "Backlight GPIO38 set HIGH (pre-PMU)");
-        - delay: 1000ms
-
-    - priority: 600
-      then:
-        # M5PM1 I2C init — retry 10× for cold boot reliability
-        - lambda: |-
-            uint8_t cmd[2]; uint8_t buf[2]; bool pmu_ok = false;
-            for (int retry = 0; retry < 10; retry++) {
-              cmd[0] = 0x00;
-              auto w = id(bsp_i2c).write(0x6E, cmd, 1); delay(10);
-              auto r = id(bsp_i2c).read(0x6E, buf, 1);
-              if (w == esphome::i2c::ERROR_OK && r == esphome::i2c::ERROR_OK) { pmu_ok = true; break; }
-              ESP_LOGW("pmu", "M5PM1 I2C retry %d/10", retry+1);
-              delay(100);
-            }
-            if (pmu_ok) {
-              ESP_LOGI("pmu", "M5PM1 OK, configuring power rails");
-              cmd[0] = 0x06; cmd[1] = 0x1F; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
-              cmd[0] = 0x16; id(bsp_i2c).write(0x6E, cmd, 1);
-              if (id(bsp_i2c).read(0x6E, buf, 1) == esphome::i2c::ERROR_OK) {
-                buf[0] &= ~0x04; cmd[0] = 0x16; cmd[1] = buf[0]; id(bsp_i2c).write(0x6E, cmd, 2);
-              }
-              delay(10);
-              cmd[0] = 0x10; cmd[1] = 0x04; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
-              cmd[0] = 0x13; cmd[1] = 0x00; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
-              cmd[0] = 0x11; cmd[1] = 0x04; id(bsp_i2c).write(0x6E, cmd, 2); delay(200);
-              ESP_LOGI("pmu", "M5PM1 power rails configured");
-            } else {
-              ESP_LOGE("pmu", "M5PM1 I2C FAILED after 10 retries - continuing without PMU");
-            }
-            // Post-PMU backlight re-assert
-            pinMode(38, OUTPUT);
-            digitalWrite(38, HIGH);
-            ESP_LOGI("pmu", "Backlight GPIO38 set HIGH (post-PMU)");
-
+            ESP_LOGI("pmu", "Backlight GPIO38 HIGH (direct GPIO)");
+        - delay: 800ms
     - priority: 200
       then:
-        # Start wake word detection after all subsystems ready
         - micro_wake_word.start
 
 # ── Hardware ──────────────────────────────────────────────────
@@ -96,6 +61,46 @@ wifi:
     gateway: 192.168.1.1
     subnet: 255.255.255.0
   ap:
+  on_connect:
+    - delay: 3s
+    - lambda: |-
+        static bool pmu_done = false;
+        if (pmu_done) return;
+
+        uint8_t cmd[2]; uint8_t buf[2]; bool pmu_ok = false;
+        for (int retry = 0; retry < 5; retry++) {
+          cmd[0] = 0x00;
+          auto w = id(bsp_i2c).write(0x6E, cmd, 1); delay(5);
+          auto r = id(bsp_i2c).read(0x6E, buf, 1);
+          if (w == esphome::i2c::ERROR_OK && r == esphome::i2c::ERROR_OK) { pmu_ok = true; break; }
+          ESP_LOGW("pmu", "PMU late retry %d/5", retry+1);
+          delay(200);
+        }
+
+        if (!pmu_ok) {
+          ESP_LOGW("pmu", "PMU still unreachable after wifi+3s delay");
+          return;
+        }
+
+        ESP_LOGI("pmu", "M5PM1 OK (late init), configuring power rails");
+        cmd[0] = 0x09; cmd[1] = 0x00; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
+        cmd[0] = 0x0A; cmd[1] = 0x00; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
+        cmd[0] = 0x06; cmd[1] = 0x1F; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
+        cmd[0] = 0x16; id(bsp_i2c).write(0x6E, cmd, 1);
+        if (id(bsp_i2c).read(0x6E, buf, 1) == esphome::i2c::ERROR_OK) {
+          buf[0] &= ~0x04; cmd[0] = 0x16; cmd[1] = buf[0]; id(bsp_i2c).write(0x6E, cmd, 2);
+        }
+        delay(10);
+        cmd[0] = 0x10; cmd[1] = 0x04; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
+        cmd[0] = 0x13; cmd[1] = 0x00; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
+        cmd[0] = 0x11; cmd[1] = 0x04; id(bsp_i2c).write(0x6E, cmd, 2); delay(200);
+        ESP_LOGI("pmu", "M5PM1 power rails configured — screen + mic should now work");
+
+        // Re-assert backlight through proper PMU rail
+        pinMode(38, OUTPUT);
+        digitalWrite(38, HIGH);
+
+        pmu_done = true;
 
 api:
   encryption:
@@ -118,7 +123,8 @@ i2c:
     sda: GPIO47
     scl: GPIO48
     scan: false
-    frequency: 400kHz
+    frequency: 100kHz
+    setup_priority: -100
 
 spi:
   clk_pin: GPIO40
