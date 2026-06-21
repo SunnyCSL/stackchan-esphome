@@ -20,7 +20,7 @@ oww = Model(wakeword_models=[WAKE_WORD], inference_framework="onnx")
 
 print(f"[{time.strftime('%H:%M:%S')}] Starting arecord pipe...")
 proc = subprocess.Popen(
-    ["arecord", "-D", "plughw:1,0", "-f", "S16_LE", "-r", str(RATE), "-c", "1", "-t", "raw"],
+    ["arecord", "-D", "plughw:2,0", "-f", "S16_LE", "-r", str(RATE), "-c", "1", "-t", "raw"],
     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
 )
 
