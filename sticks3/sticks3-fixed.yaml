@@ -230,7 +230,7 @@ text_sensor:
 
 micro_wake_word:
   models:
-    - model: okay_nabu
+    - model: "models/robi/robi.json"
   microphone:
     microphone: sticks3_mic
     channels: 0
