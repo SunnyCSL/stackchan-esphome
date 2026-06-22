@@ -33,10 +33,10 @@ esphome:
       then:
         - micro_wake_word.start
         - lambda: |-
-            // Init buttons explicitly (GPIO0 needs care on ESP32-S3)
-            pinMode(11, INPUT_PULLUP);
+            // Init buttons explicitly
+            pinMode(1, INPUT_PULLUP);
             pinMode(0, INPUT_PULLUP);
-            ESP_LOGI("btn", "KEY1(GPIO11) and KEY2(GPIO0) initialized");
+            ESP_LOGI("btn", "KEY1(GPIO1) and KEY2(GPIO0) initialized");
             // Publish initial mode so HA discovers the text_sensor
             id(current_mode).publish_state("語音");
             ESP_LOGI("mode", "Initial mode: 語音");
@@ -101,7 +101,9 @@ wifi:
         delay(10);
         cmd[0] = 0x10; cmd[1] = 0x04; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
         cmd[0] = 0x13; cmd[1] = 0x00; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
-        cmd[0] = 0x11; cmd[1] = 0x04; id(bsp_i2c).write(0x6E, cmd, 2); delay(200);
+        cmd[0] = 0x11; cmd[1] = 0x04; id(bsp_i2c).write(0x6E, cmd, 2); delay(10);
+        // Enable L3B: GPIO2 output HIGH → powers MIC + SPK + backlight
+        cmd[0] = 0x14; cmd[1] = 0x04; id(bsp_i2c).write(0x6E, cmd, 2); delay(200);
         ESP_LOGI("pmu", "M5PM1 power rails configured — screen + mic should now work");
 
         // Re-assert backlight through proper PMU rail
@@ -302,7 +304,7 @@ binary_sensor:
   - platform: gpio
     name: "KEY1 Push to Talk"
     pin:
-      number: GPIO11
+      number: GPIO1
       mode:
         input: true
         pullup: true

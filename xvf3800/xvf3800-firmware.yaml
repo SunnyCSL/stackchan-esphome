@@ -82,6 +82,25 @@ microphone:
     channel: stereo
     use_apll: false
 
+# ── Wake Word — "Robi" (fixed position, high sensitivity) ────
+
+micro_wake_word:
+  models:
+    - model: "github://esphome/micro-wake-word-models/models/v2/okay_nabu.json"
+      probability_cutoff: 0.93
+      sliding_window_size: 7
+  microphone:
+    microphone: xvf3800_mic
+    channels: 0
+    gain_factor: 6
+  on_wake_word_detected:
+    - lambda: |-
+        ESP_LOGI("ww", "XVF3800 Robi detected");
+    - homeassistant.event:
+        event: esphome.xvf3800_wake_word
+        data:
+          wake_word: !lambda return wake_word;
+
 # ── Voice Assistant (stub - keeps assist_satellite available) ──
 
 voice_assistant:

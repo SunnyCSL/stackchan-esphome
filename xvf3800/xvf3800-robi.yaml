@@ -1,18 +1,14 @@
 # ============================================================
-# XVF3800 — ESP32-S3 Fixed Voice Satellite
-# Role: Fixed-position "Robi" wake word + voice pipeline
+# XVF3800 — ESP32-S3 Wake Word Detector (Fixed Position)
+# Role: Sensitive "Robi" wake word → HTTP trigger Radxa
 # ============================================================
-# Architecture:
-#   XVF3800 ESP32 detects "Robi" (micro_wake_word, sensitive)
-#   → ESPHome voice_assistant → HA pipeline → Radxa processing
-#   
-#   XMOS XU316 → USB Audio → Radxa (for high-quality capture)
-#   ESP32 I2S from XMOS: may work for wake word detection
+# Detects "Robi" with higher sensitivity (fixed position)
+# → HTTP POST to Radxa bridge → XVF3800 USB audio capture
 # ============================================================
 
 substitutions:
-  name: xvf3800-voice
-  friendly_name: "XVF3800 Voice"
+  name: xvf3800-ww
+  friendly_name: "XVF3800 WakeWord"
 
 esphome:
   name: ${name}
@@ -24,14 +20,7 @@ esp32:
   variant: esp32s3
   flash_size: 8MB
   framework:
-    type: esp-idf
-    sdkconfig_options:
-      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
-      CONFIG_SPIRAM: "y"
-      CONFIG_SPIRAM_MODE_OCT: "y"
-      CONFIG_SPIRAM_FREQ_80M: "y"
-      CONFIG_SPIRAM_USE_MALLOC: "y"
-      CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY: "y"
+    type: arduino
 
 psram:
   mode: octal
@@ -44,7 +33,7 @@ wifi:
   password: "8447Ce8086"
   power_save_mode: none
   manual_ip:
-    static_ip: 192.168.1.223
+    static_ip: 192.168.1.224  # Changed IP for new role
     gateway: 192.168.1.1
     subnet: 255.255.255.0
 
@@ -63,8 +52,7 @@ logger:
 time:
   - platform: homeassistant
 
-# ── I2S Audio (from XMOS) ─────────────────────────────────────
-# XMOS outputs beamformed audio via I2S to these pins
+# ── I2S Audio (from XMOS, for wake word detection only) ──────
 
 i2s_audio:
   i2s_lrclk_pin: GPIO10
@@ -87,52 +75,17 @@ microphone:
 micro_wake_word:
   models:
     - model: "github://esphome/micro-wake-word-models/models/v2/okay_nabu.json"
-      # Will be replaced with custom Robi model once tested
-      probability_cutoff: 0.93  # More sensitive than StickS3 (0.97)
-      sliding_window_size: 7   # Larger window = more robust in fixed position
+      probability_cutoff: 0.93
+      sliding_window_size: 7
   microphone:
     microphone: xvf3800_mic
     channels: 0
-    gain_factor: 6              # Higher gain for fixed far-field
+    gain_factor: 6
   on_wake_word_detected:
     - lambda: |-
         ESP_LOGI("ww", "XVF3800 Robi detected");
-    - voice_assistant.start:
-        wake_word: !lambda return wake_word;
-
-speaker:
-  - platform: i2s_audio
-    id: xvf3800_spk
-    dac_type: external
-    i2s_dout_pin: GPIO14
-    sample_rate: 16000
-    bits_per_sample: 16bit
-    use_apll: false
-
-# ── Voice Assistant ───────────────────────────────────────────
-
-voice_assistant:
-  microphone: xvf3800_mic
-  speaker: xvf3800_spk
-  use_wake_word: true
-  volume_multiplier: 2.0
-  noise_suppression_level: 2
-  auto_gain: 31dBFS
-  on_client_connected:
-    then:
-      - lambda: |-
-          ESP_LOGI("va", "XVF3800 HA voice client CONNECTED");
-  on_listening:
-    then:
-      - lambda: |-
-          ESP_LOGI("va", "XVF3800 === LISTENING ===");
-  on_tts_start:
-    then:
-      - lambda: |-
-          ESP_LOGI("va", "XVF3800 === SPEAKING ===");
-  on_end:
-    then:
-      - lambda: |-
-          ESP_LOGI("va", "XVF3800 === VA END ===");
-      - delay: 300ms
-      - micro_wake_word.start
+    - homeassistant.event:
+        event: esphome.xvf3800_wake_word
+        data:
+          wake_word: !lambda return wake_word;
+    - micro_wake_word.start
