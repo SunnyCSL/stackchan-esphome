@@ -32,6 +32,14 @@ esphome:
     - priority: 200
       then:
         - micro_wake_word.start
+        - lambda: |-
+            // Init buttons explicitly (GPIO0 needs care on ESP32-S3)
+            pinMode(11, INPUT_PULLUP);
+            pinMode(0, INPUT_PULLUP);
+            ESP_LOGI("btn", "KEY1(GPIO11) and KEY2(GPIO0) initialized");
+            // Publish initial mode so HA discovers the text_sensor
+            id(current_mode).publish_state("語音");
+            ESP_LOGI("mode", "Initial mode: 語音");
 
 # ── Hardware ──────────────────────────────────────────────────
 
@@ -130,7 +138,13 @@ spi:
   clk_pin: GPIO40
   mosi_pin: GPIO39
 
-# ── Display ───────────────────────────────────────────────────
+# ── Display (with mode indicator) ──────────────────────────────
+
+globals:
+  - id: ui_mode
+    type: int
+    initial_value: '0'
+    restore_value: false
 
 display:
   - platform: st7789v
@@ -166,11 +180,15 @@ display:
         snprintf(bat_str, sizeof(bat_str), "BAT %d%%", bat_pct);
         it.printf(80, 10, id(font_sm), bat_v > 3.5 ? Color(100,200,100) : Color(255,100,100), "%s", bat_str);
       } else {
-        it.printf(80, 10, id(font_sm), Color(100,100,100), "USB");
+        it.printf(80, 10, id(font_sm), Color(100,100,100), "PWR");
       }
-      it.printf(8, 55, id(font_md), Color::WHITE, "Say:");
-      it.printf(8, 78, id(font_md), Color(100, 200, 255), "\"Okay Nabu\"");
-      it.printf(8, 110, id(font_sm), Color(100, 100, 100), "KEY1=Push to Talk");
+      // Show mode name
+      int m = id(ui_mode);
+      const char* mode_names[] = {"Voice", "Remote", "Chat"};
+      const int mode_colors[] = {200, 150, 220};
+      it.printf(8, 40, id(font_sm), Color(mode_colors[m], 200, 255 - mode_colors[m]), "%s", mode_names[m]);
+      it.printf(8, 60, id(font_md), Color::WHITE, "Say:");
+      it.printf(8, 82, id(font_md), Color(100, 200, 255), "\"Robi\"");
 
 font:
   - file: "gfonts://Figtree"
@@ -197,15 +215,16 @@ sensor:
       if (id(bsp_i2c).read(0x6E, buf, 2) != esphome::i2c::ERROR_OK) return NAN;
       uint16_t raw = (buf[0] << 4) | (buf[1] & 0x0F);
       float v = raw * 0.0014f;
-      // AXP2101 battery ADC might need enabling - if 0V, return NAN
       if (v < 0.1) return NAN;
       return v;
 
+text_sensor:
   - platform: template
     id: current_mode
     name: "StickS3 Current Mode"
     update_interval: never
-    lambda: return 0;
+    lambda: |-
+      return "語音";
 
 # ── Wake Word ─────────────────────────────────────────────────
 
@@ -314,10 +333,9 @@ binary_sensor:
       then:
         - lambda: |-
             ESP_LOGI("key2", "KEY2 pressed — mode switch");
-            // Cycle through modes: 0=voice, 1=IR, 2=servo
-            static int mode = 0;
-            mode = (mode + 1) % 3;
-            id(current_mode)->publish_state(mode);
-    on_double_click:
-      then:
-        - lambda: ESP_LOGI("key2", "KEY2 double-click — special action");
+            id(ui_mode) = (id(ui_mode) + 1) % 3;
+            id(sticks3_display).update();
+            // Publish to HA so bridge knows current mode
+            if (id(ui_mode) == 0) id(current_mode).publish_state("語音");
+            else if (id(ui_mode) == 1) id(current_mode).publish_state("遙控");
+            else id(current_mode).publish_state("傾偈");

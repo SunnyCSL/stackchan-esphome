@@ -1,0 +1,56 @@
+substitutions:
+  name: stackchan-robi
+  friendly_name: StackChan Robi
+
+packages:
+  - !include /home/radxa/stackchan-esphome/stackchan/stackchan-bsp-local.yaml
+
+esphome:
+  name: stackchan-robi
+  on_boot:
+    priority: 600
+    then:
+      - bm8563.read_time:
+  platformio_options:
+    board_build.arduino_build_var: "0"
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  power_save_mode: none
+  manual_ip:
+    static_ip: 192.168.1.180
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+# ── Robi Voice State → Face Expression ──
+text_sensor:
+  - platform: template
+    name: "Robi Voice State"
+    id: robi_voice_state
+    lambda: |-
+      return {"idle"};
+    on_value:
+      then:
+        - lambda: |-
+            std::string state = x;
+            if (state == "idle")        { id(face_expression) = 0; }
+            else if (state == "listening")  { id(face_expression) = 4; }
+            else if (state == "thinking")   { id(face_expression) = 5; }
+            else if (state == "speaking")   { id(face_expression) = 7; }
+            else if (state == "happy")      { id(face_expression) = 1; }
+            else if (state == "sad")        { id(face_expression) = 2; }
+            else if (state == "angry")      { id(face_expression) = 3; }
+            else if (state == "sleeping")   { id(face_expression) = 6; }
+        - lambda: |-
+            id(m5cores3_lcd).update();
