@@ -1,0 +1,47 @@
+substitutions:
+  name: xvf3800-wireless
+  friendly_name: XVF3800 I2C Test
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: VERBOSE
+  logs:
+    i2c: DEBUG
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  power_save_mode: none
+  manual_ip:
+    static_ip: 192.168.1.224
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+# I2C to XMOS — try with external pull-ups on XIAO side
+i2c:
+  sda: GPIO5
+  scl: GPIO6
+  scan: true
+  frequency: 100kHz
+  id: xmos_i2c

@@ -18,7 +18,7 @@ psram:
   speed: 80MHz
 
 logger:
-  level: INFO
+  level: VERBOSE
 
 wifi:
   ssid: "SC"
@@ -36,8 +36,17 @@ api:
 ota:
   - platform: esphome
 
-# I2S Audio from XMOS (I2S master mode)
-# XIAO acts as I2S secondary (slave), reads 4-mic array via XMOS
+# I2C to XMOS with pull-ups
+i2c:
+  sda: GPIO5
+  scl: GPIO6
+  scan: true
+  frequency: 100kHz
+  id: xmos_i2c
+  sda_pullup_enabled: true
+  scl_pullup_enabled: true
+
+# I2S Audio from XMOS (XIAO is I2S master)
 i2s_audio:
   i2s_lrclk_pin: GPIO7
   i2s_bclk_pin: GPIO8
@@ -53,7 +62,6 @@ microphone:
     i2s_mode: primary
 
 # ── Wake word ──
-
 micro_wake_word:
   models:
     - model: "models/robi/robi.json"
@@ -67,8 +75,7 @@ micro_wake_word:
         ESP_LOGI("ww", "Robi detected!");
     - voice_assistant.start
 
-# ── Voice Assistant → HA → Robi Conversation Agent → Bridge ──
-
+# ── Voice Assistant ──
 voice_assistant:
   microphone: xvf3800_mic
   use_wake_word: false
