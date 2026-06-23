@@ -1,0 +1,84 @@
+substitutions:
+  name: xvf3800-wireless
+  friendly_name: XVF3800 Wireless
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: INFO
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  power_save_mode: none
+  manual_ip:
+    static_ip: 192.168.1.224
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+# I2S Audio from XMOS (I2S master mode)
+# XIAO acts as I2S secondary (slave), reads 4-mic array via XMOS
+i2s_audio:
+  i2s_lrclk_pin: GPIO7
+  i2s_bclk_pin: GPIO8
+
+microphone:
+  - platform: i2s_audio
+    id: xvf3800_mic
+    adc_type: external
+    i2s_din_pin: GPIO43
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: stereo
+    i2s_mode: primary
+
+# ── Wake word ──
+
+micro_wake_word:
+  models:
+    - model: "models/robi/robi.json"
+      probability_cutoff: 0.85
+      sliding_window_size: 7
+  microphone:
+    microphone: xvf3800_mic
+    channels: 0
+  on_wake_word_detected:
+    - lambda: |-
+        ESP_LOGI("ww", "Robi detected!");
+    - voice_assistant.start
+
+# ── Voice Assistant → HA → Robi Conversation Agent → Bridge ──
+
+voice_assistant:
+  microphone: xvf3800_mic
+  use_wake_word: false
+  noise_suppression_level: 2
+  auto_gain: 31dBFS
+  volume_multiplier: 2.0
+  on_listening:
+    then:
+      - lambda: ESP_LOGI("va", "=== LISTENING ===");
+  on_end:
+    then:
+      - delay: 300ms
+      - micro_wake_word.start

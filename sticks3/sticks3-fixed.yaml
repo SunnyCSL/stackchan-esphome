@@ -285,15 +285,24 @@ text_sensor:
     lambda: |-
       return "語音";
 
+  - platform: template
+    id: voice_state
+    name: "StickS3 Voice State"
+    update_interval: never
+    lambda: |-
+      return "idle";
+
 # ── Wake Word ─────────────────────────────────────────────────
 
 micro_wake_word:
   models:
     - model: "models/robi/robi.json"
+      probability_cutoff: 0.85
+      sliding_window_size: 7
   microphone:
     microphone: sticks3_mic
     channels: 0
-    gain_factor: 4
+    gain_factor: 6
   on_wake_word_detected:
     - lambda: ESP_LOGI("ww", "Wake word detected!");
     - voice_assistant.start:

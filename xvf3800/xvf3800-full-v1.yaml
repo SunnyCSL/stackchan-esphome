@@ -1,0 +1,123 @@
+substitutions:
+  name: xvf3800-wireless
+  friendly_name: XVF3800 Wireless
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+# Custom components from formatBCE (for XVF3800 I2C control + AIC3104 DAC)
+external_components:
+  - source:
+      type: git
+      url: https://github.com/formatBCE/Respeaker-XVF3800-ESPHome-integration
+      ref: main
+
+logger:
+  level: INFO
+
+wifi:
+  ssid: "SC"
+  password: "8447Ce8086"
+  power_save_mode: none
+  manual_ip:
+    static_ip: 192.168.1.224
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+
+api:
+  encryption:
+    key: "4yIspKQlOBu34SLnIQOFeNAQpk3Ke6kX18FTekvpaQk="
+
+ota:
+  - platform: esphome
+
+# I2C bus for XVF3800 control
+i2c:
+  id: internal_i2c
+  sda: GPIO5
+  scl: GPIO6
+  scan: true
+  frequency: 100kHz
+  sda_pullup_enabled: true
+  scl_pullup_enabled: true
+
+# XVF3800 control (enables LED ring + beamforming + AEC)
+respeaker_xvf3800:
+  id: xvf3800_ctrl
+
+# Audio DAC (onboard AIC3104 codec config)
+audio_dac:
+  - platform: aic3104
+    id: aic3104_dac
+    i2c_id: internal_i2c
+
+# I2S Audio from XMOS (I2S master mode)
+i2s_audio:
+  i2s_lrclk_pin: GPIO7
+  i2s_bclk_pin: GPIO8
+
+microphone:
+  - platform: i2s_audio
+    id: xvf3800_mic
+    adc_type: external
+    i2s_din_pin: GPIO43
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: stereo
+    i2s_mode: secondary
+
+speaker:
+  - platform: i2s_audio
+    id: xvf3800_spk
+    dac_type: external
+    i2s_dout_pin: GPIO44
+    sample_rate: 48000
+    bits_per_sample: 16bit
+    i2s_mode: secondary
+
+# ── Wake word ──
+
+micro_wake_word:
+  models:
+    - model: "models/robi/robi.json"
+      probability_cutoff: 0.85
+      sliding_window_size: 7
+  microphone:
+    microphone: xvf3800_mic
+    channels: 0
+  on_wake_word_detected:
+    - lambda: |-
+        ESP_LOGI("ww", "Robi detected on XVF3800 wireless!");
+    - voice_assistant.start
+
+# ── Voice Assistant (streams to HA → Robi Conversation Agent → Bridge) ──
+
+voice_assistant:
+  microphone: xvf3800_mic
+  speaker: xvf3800_spk
+  use_wake_word: false
+  noise_suppression_level: 2
+  auto_gain: 31dBFS
+  volume_multiplier: 2.0
+  on_client_connected:
+    then:
+      - lambda: ESP_LOGI("va", "HA voice client CONNECTED");
+  on_listening:
+    then:
+      - lambda: ESP_LOGI("va", "=== LISTENING ===");
+  on_end:
+    then:
+      - delay: 300ms
+      - micro_wake_word.start

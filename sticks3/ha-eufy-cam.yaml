@@ -1,0 +1,9 @@
+# Eufy Indoor Cam RTSP — added 2026-06-23
+stream:
+  # Enable generic stream component for RTSP camera
+
+camera:
+  - platform: ffmpeg
+    name: "Eufy Indoor Cam"
+    input: -rtsp_transport tcp -i "rtsp://Dd44y9eTa3SYDZFx:Vg6tsLYkws5z4kvI@192.168.1.206/live0"
+    extra_arguments: -pred 1 -q:v 2
