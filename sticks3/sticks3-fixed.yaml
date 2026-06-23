@@ -5,7 +5,8 @@
 # Architecture:
 #   micro_wake_word("okay_nabu") → on-device detection
 #   voice_assistant (use_wake_word: true) → HA pipeline (Robi)
-#   KEY1 (GPIO11) = push-to-talk fallback
+#   KEY1 (GPIO11, NOT GPIO1!) = push-to-talk fallback
+#   KEY2 (GPIO12, NOT GPIO0!) = mode switch (Voice/Remote/Chat)
 # -----------------------------------------------------------
 # Critical PMU fix:
 #   M5PM1 I2C init deferred to wifi.on_connect + 3s delay
@@ -33,10 +34,10 @@ esphome:
       then:
         - micro_wake_word.start
         - lambda: |-
-            // Init buttons explicitly
-            pinMode(1, INPUT_PULLUP);
-            pinMode(0, INPUT_PULLUP);
-            ESP_LOGI("btn", "KEY1(GPIO1) and KEY2(GPIO0) initialized");
+            // Init buttons explicitly — M5StickS3: BtnA=GPIO11, BtnB=GPIO12
+            pinMode(11, INPUT_PULLUP);
+            pinMode(12, INPUT_PULLUP);
+            ESP_LOGI("btn", "KEY1(GPIO11) and KEY2(GPIO12) initialized");
             // Publish initial mode so HA discovers the text_sensor
             id(current_mode).publish_state("語音");
             ESP_LOGI("mode", "Initial mode: 語音");
@@ -169,28 +170,84 @@ display:
         else if (bat_v > 3.5) bat_pct = 25;
         else bat_pct = 10;
       }
-      it.fill(Color(5, 5, 15));
+      // Distinct themes per mode
+      int m = id(ui_mode);
+      Color bg, accent, text1, text2;
+      const char* mode_symbol = "";
+      const char* hint1 = "";
+      const char* hint2 = "";
+      if (m == 0) {
+        // Voice mode — Blue/Teal theme
+        bg = Color(5, 10, 28);
+        accent = Color(50, 200, 255);
+        text1 = Color(180, 220, 255);
+        text2 = Color(100, 180, 230);
+        mode_symbol = "VOICE";
+        hint1 = "Say: Robi";
+        hint2 = "for commands";
+      } else if (m == 1) {
+        // Remote mode — Amber/Orange theme
+        bg = Color(28, 16, 4);
+        accent = Color(255, 160, 40);
+        text1 = Color(255, 200, 140);
+        text2 = Color(200, 140, 60);
+        mode_symbol = "REMOTE";
+        hint1 = "KEY1=Power";
+        hint2 = "KEY2=Volume";
+      } else {
+        // Chat mode — Purple/Magenta theme
+        bg = Color(20, 5, 28);
+        accent = Color(200, 80, 255);
+        text1 = Color(220, 180, 255);
+        text2 = Color(160, 100, 200);
+        mode_symbol = "CHAT";
+        hint1 = "Ask me";
+        hint2 = "anything!";
+      }
+      it.fill(bg);
+      
+      // Top bar: time left, PWR right
       if (t.is_valid()) {
         char time_str[16];
         snprintf(time_str, sizeof(time_str), "%02d:%02d", t.hour, t.minute);
-        it.printf(8, 8, id(font_md), Color::WHITE, "%s", time_str);
+        it.printf(6, 6, id(font_sm), text2, "%s", time_str);
       } else {
-        it.printf(8, 8, id(font_sm), Color(100,100,100), "Syncing...");
+        it.printf(6, 6, id(font_sm), Color(80,80,80), "----");
       }
       if (!isnan(bat_v)) {
         char bat_str[16];
         snprintf(bat_str, sizeof(bat_str), "BAT %d%%", bat_pct);
-        it.printf(80, 10, id(font_sm), bat_v > 3.5 ? Color(100,200,100) : Color(255,100,100), "%s", bat_str);
+        it.printf(90, 6, id(font_sm), bat_v > 3.5 ? Color(100,200,100) : Color(255,100,100), "%s", bat_str);
       } else {
-        it.printf(80, 10, id(font_sm), Color(100,100,100), "PWR");
+        it.printf(90, 6, id(font_sm), Color(80,80,80), "PWR");
       }
-      // Show mode name
-      int m = id(ui_mode);
-      const char* mode_names[] = {"Voice", "Remote", "Chat"};
-      const int mode_colors[] = {200, 150, 220};
-      it.printf(8, 40, id(font_sm), Color(mode_colors[m], 200, 255 - mode_colors[m]), "%s", mode_names[m]);
-      it.printf(8, 60, id(font_md), Color::WHITE, "Say:");
-      it.printf(8, 82, id(font_md), Color(100, 200, 255), "\"Robi\"");
+      
+      // Mode separator bar
+      it.line(0, 24, 134, 24, accent);
+      
+      // Big mode symbol — centered, bold
+      it.printf(6, 32, id(font_md), accent, mode_symbol);
+      
+      // Mode-specific content
+      if (m == 0) {
+        // Voice: mic indicator + wake word
+        it.filled_circle(100, 52, 10, Color(50, 200, 255));
+        it.filled_circle(100, 52, 6, bg);
+        it.printf(6, 60, id(font_sm), text1, hint1);
+        it.printf(6, 78, id(font_sm), text2, hint2);
+      } else if (m == 1) {
+        // Remote: IR indicator + key hints
+        it.filled_circle(108, 48, 14, Color(255, 160, 40, 60));
+        it.filled_circle(108, 48, 4, Color(255, 160, 40));
+        it.printf(6, 60, id(font_sm), text1, hint1);
+        it.printf(6, 78, id(font_sm), text2, hint2);
+      } else {
+        // Chat: bubble style
+        it.filled_rectangle(96, 40, 34, 16, Color(200, 80, 255, 40));
+        it.filled_rectangle(98, 42, 30, 12, bg);
+        it.printf(6, 56, id(font_sm), text1, hint1);
+        it.printf(6, 74, id(font_sm), text2, hint2);
+      }
 
 font:
   - file: "gfonts://Figtree"
@@ -304,7 +361,7 @@ binary_sensor:
   - platform: gpio
     name: "KEY1 Push to Talk"
     pin:
-      number: GPIO1
+      number: GPIO11
       mode:
         input: true
         pullup: true
@@ -322,7 +379,7 @@ binary_sensor:
   - platform: gpio
     name: "KEY2 Mode Switch"
     pin:
-      number: GPIO0
+      number: GPIO12
       mode:
         input: true
         pullup: true
