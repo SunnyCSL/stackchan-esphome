@@ -18,7 +18,7 @@ psram:
   speed: 80MHz
 
 logger:
-  level: VERBOSE
+  level: DEBUG
 
 wifi:
   ssid: "SC"
@@ -36,17 +36,7 @@ api:
 ota:
   - platform: esphome
 
-# I2C to XMOS with pull-ups
-i2c:
-  sda: GPIO5
-  scl: GPIO6
-  scan: true
-  frequency: 100kHz
-  id: xmos_i2c
-  sda_pullup_enabled: true
-  scl_pullup_enabled: true
-
-# I2S Audio from XMOS (XIAO is I2S master)
+# I2S Audio — XIAO is MASTER (standard I2S firmware, 16kHz)
 i2s_audio:
   i2s_lrclk_pin: GPIO7
   i2s_bclk_pin: GPIO8
@@ -57,8 +47,8 @@ microphone:
     adc_type: external
     i2s_din_pin: GPIO43
     sample_rate: 16000
-    bits_per_sample: 16bit
-    channel: stereo
+    bits_per_sample: 32bit
+    channel: left
     i2s_mode: primary
 
 # ── Wake word ──
