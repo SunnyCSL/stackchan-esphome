@@ -3,3 +3,10 @@
 # You can modify this file to suit your needs.
 /.esphome/
 /secrets.yaml
+
+# Virtual environments — massive binary deps
+venv/
+venv-ww/
+
+# Binary firmware blobs
+*.bin
